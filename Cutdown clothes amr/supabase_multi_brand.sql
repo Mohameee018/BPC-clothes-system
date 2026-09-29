@@ -147,3 +147,23 @@ revoke all on table public.orders from anon, authenticated;
 revoke all on table public.order_items from anon, authenticated;
 revoke all on table public.returns from anon, authenticated;
 revoke all on table public.reviews from anon, authenticated;
+
+-- Keep legacy customer auto-linking inside the user's brand.
+create or replace function public.link_customer_to_auth_user()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare v_brand uuid;
+begin
+  v_brand := nullif(new.raw_user_meta_data->>'brand_id','')::uuid;
+  if new.email is not null then
+    update public.customers
+    set auth_user_id=new.id, updated_at=now()
+    where auth_user_id is null
+      and (v_brand is null or brand_id=v_brand)
+      and lower(email)=lower(new.email);
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.link_customer_to_auth_user() from public, anon, authenticated;
