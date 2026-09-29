@@ -5,6 +5,7 @@
 revoke execute on function public.process_whole_order_return(uuid,text,text,numeric,numeric) from public, anon, authenticated;
 revoke execute on function public.reserve_variant_stock(jsonb) from public, anon, authenticated;
 revoke execute on function public.release_variant_stock(jsonb) from public, anon, authenticated;
+revoke all on table public.payment_events from public, anon, authenticated;
 
 -- Customer claiming must stay inside the authenticated user's configured brand.
 create or replace function public.claim_customer_for_auth()
