@@ -7,8 +7,18 @@ import {fileURLToPath} from "node:url";
 import {createClient} from "@supabase/supabase-js";
 dotenv.config();
 const __dirname=path.dirname(fileURLToPath(import.meta.url)),app=express();
-app.use(cors());app.use(express.json({limit:"12mb"}));app.use(express.static(__dirname));
+app.set("trust proxy",1);
+const base=process.env.PUBLIC_BASE_URL||"";
+const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim()).filter(Boolean);
+app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"));},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
+app.use(express.json({limit:"12mb"}));
+const blockedStatic=/^\/(?:server\.js|package(?:-lock)?\.json|\.env(?:\..*)?|supabase[^/]*\.sql)(?:$|\/)/i;
+app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
+app.use(express.static(__dirname,{index:"index.html",etag:true,maxAge:"1h"}));
 const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY):null;
+const rateBuckets=new Map();
+function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
+setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
 const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
 const configuredBrandId=()=>String(process.env.CUTDOWN_BRAND_ID||DEFAULT_BRAND_ID).trim();
 const base=process.env.PUBLIC_BASE_URL||"",paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
@@ -118,7 +128,7 @@ async function ensureCustomerForUser(user){
 }
 const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
-app.post("/api/auth/signup",async(q,r)=>{
+app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim();
  if(!email||password.length<6)return r.status(400).json({error:"Email and password are required; password must be at least 6 characters."});
@@ -130,7 +140,7 @@ app.post("/api/auth/signup",async(q,r)=>{
  if(profile.error)return r.status(500).json({error:"Account created but brand assignment failed. Please contact support."});
  r.status(201).json({user:{id:user.id,email:user.email||null},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
 });
-app.post("/api/desktop/auth/login",async(q,r)=>{
+app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"desktop-login"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim(),password=String(q.body?.password||"");
  if(!email||!password)return r.status(400).json({error:"Email and password are required."});
@@ -166,14 +176,14 @@ app.post("/api/admin/brands/account",async(q,r)=>{
  if(created.error)return r.status(409).json({error:created.error.message});
  const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
  if(profile.error)return r.status(500).json({error:profile.error.message});
- r.status(201).json({user_id:created.data.user.id,email,temporary_password:password,brand:brand.data});
+ r.status(201).json({user_id:created.data.user.id,email,brand:brand.data});
 });
 app.get("/api/desktop/update",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Desktop login required."});
  const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
  const brand=await supabase.from("brands").select("id,name,desktop_update_channel,active").eq("id",profile.brand_id).maybeSingle();
  if(brand.error||!brand.data?.active)return r.status(403).json({error:"Brand is inactive."});
- r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||""),mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
+ r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||""),sha256:String(process.env.CUTDOWN_DESKTOP_SHA256||"").toLowerCase(),mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
 });
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:configuredBrandId()})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
@@ -185,7 +195,7 @@ app.post("/api/account/profile",async(q,r)=>{
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
  if(!Object.keys(patch).length)return r.status(400).json({error:"No profile changes."});
- const profile=await getAuthProfile(user.id); const updated=await supabase.from("customers").update(patch).eq("id",customer.id).eq("brand_id",String(profile?.brand_id||configuredBrandId())).select("id,name,email,phone,city,address").maybeSingle();
+ const profile=await getAuthProfile(user.id); const updated=await supabase.from("customers").update(patch).eq("id",customer.id).eq("brand_id",String(profile?.brand_id||"")).select("id,name,email,phone,city,address").maybeSingle();
  if(updated.error)return r.status(500).json({error:updated.error.message});if(!updated.data)return r.status(404).json({error:"Customer profile not found."});r.json({customer:updated.data});
 });
 app.get("/api/account/orders",async(q,r)=>{
@@ -228,7 +238,7 @@ app.get("/api/products",async(_q,r)=>{
  r.json(products.map(p=>({...p,variants:vm.get(p.id)||[],images:im.get(p.id)||[]})));
 });
 app.get("/api/reviews",async(_q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {data,error}=await supabase.from("reviews").select("*").eq("brand_id",configuredBrandId()).eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:error.message});r.json(data||[])});
-app.post("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({brand_id:configuredBrandId(),name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:error.message});r.status(201).json(data)});
+app.post("/api/reviews",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"reviews"}),async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({brand_id:configuredBrandId(),name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:error.message});r.status(201).json(data)});
 async function findOrCreateCustomer(customer){
  if(!supabase||!customer?.phone)return null;
  const phone=String(customer.phone).trim();if(!phone)return null;
@@ -254,7 +264,7 @@ async function findOrCreateCustomer(customer){
  }
  return null;
 }
-app.post("/api/orders",async(q,r)=>{
+app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"}),async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {customer,items,payment_method}=q.body||{}; const brandId=configuredBrandId();if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
  const {data:products,error:pe}=await supabase.from("products").select("id,name,price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:pe.message});
