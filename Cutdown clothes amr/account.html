@@ -1,3 +1,34 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cutdown — Account</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px"><section class="checkout-card glass" style="max-width:900px;width:100%;margin:auto"><p class="eyebrow">CUTDOWN ACCOUNT</p><h1 id="title">Loading account…</h1><p id="info"></p><div style="display:flex;gap:12px;flex-wrap:wrap;margin:18px 0"><a class="btn" href="/">Back to store <span>↗</span></a><button class="btn" id="logout">Sign out <span>→</span></button></div><div id="orders">Loading orders…</div></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0"></script><script>
-(async()=>{const cfg=await fetch("/api/public-config").then(r=>r.json());if(!cfg.supabaseUrl||!cfg.supabaseKey){document.querySelector("#info").textContent="Supabase Auth is not configured.";return}const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey);const s=(await sb.auth.getSession()).data.session;if(!s){location.href="/";return}const h={Authorization:"Bearer "+s.access_token};const me=await fetch("/api/auth/me",{headers:h});if(!me.ok){await sb.auth.signOut();location.href="/";return}const d=await me.json();if(d.profile?.role==="admin"){location.href="/admin";return}document.querySelector("#title").textContent="Welcome"+(d.profile?.name?" "+d.profile.name:"")+".";document.querySelector("#info").textContent=d.user.email||"";const r=await fetch("/api/account/orders",{headers:h});const data=await r.json();document.querySelector("#orders").innerHTML=data.orders?.length?data.orders.map(o=>'<article style="border:1px solid rgba(255,255,255,.12);padding:18px;margin:12px 0;border-radius:14px"><strong>Order '+String(o.id)+'</strong><p>'+new Date(o.created_at).toLocaleString()+' · '+String(o.total_amount||0)+' EGP</p><p>'+String(o.order_status||"")+" · "+String(o.delivery_status||"")+" · "+String(o.payment_status||"")+'</p></article>').join(""):"No orders yet.";document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();location.href="/";};})();
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cutdown — Account</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px"><section class="checkout-card glass" style="max-width:900px;width:100%;margin:auto"><p class="eyebrow">CUTDOWN ACCOUNT</p><h1 id="title">Loading account…</h1><p id="info"></p><div style="display:flex;gap:12px;flex-wrap:wrap;margin:18px 0"><a class="btn" href="/">Back to store <span>↗</span></a><button class="btn" id="logout">Sign out <span>→</span></button></div><div style="border:1px solid rgba(255,255,255,.12);padding:18px;border-radius:14px;margin:18px 0"><p class="eyebrow">YOUR DETAILS</p><form id="profileForm" style="display:grid;gap:12px"><input name="name" placeholder="Name" maxlength="120" required><input name="phone" placeholder="Phone" maxlength="40"><input name="city" placeholder="City" maxlength="100"><textarea name="address" placeholder="Address" maxlength="500" rows="3"></textarea><button class="btn" type="submit">Save details <span>↗</span></button><p id="profileMsg"></p></form></div><div><p class="eyebrow">ORDER HISTORY</p><div id="orders">Loading orders…</div></div></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0"></script><script>
+(async()=>{
+ const cfg=await fetch("/api/public-config").then(r=>r.json());
+ if(!cfg.supabaseUrl||!cfg.supabaseKey){document.querySelector("#info").textContent="Supabase Auth is not configured.";return}
+ const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey);
+ const s=(await sb.auth.getSession()).data.session;
+ if(!s){location.href="/";return}
+ const h={Authorization:"Bearer "+s.access_token};
+ const me=await fetch("/api/auth/me",{headers:h});
+ if(!me.ok){await sb.auth.signOut();location.href="/";return}
+ const d=await me.json();
+ if(d.profile?.role==="admin"){location.href="/admin";return}
+ document.querySelector("#title").textContent="Welcome"+(d.profile?.name?" "+d.profile.name:"")+".";
+ document.querySelector("#info").textContent=d.user.email||"";
+ const form=document.querySelector("#profileForm");
+ const load=async()=>{
+   const r=await fetch("/api/account/orders",{headers:h}),data=await r.json();
+   if(data.customer){
+     for(const key of ["name","phone","city","address"])form.elements[key].value=data.customer[key]||"";
+   }
+   document.querySelector("#orders").innerHTML=data.orders?.length?data.orders.map(o=>{
+     const items=(o.order_items||[]).map(i=>String(i.product_name||"Item")+" × "+String(i.quantity||1)).join(" · ");
+     return '<article style="border:1px solid rgba(255,255,255,.12);padding:18px;margin:12px 0;border-radius:14px"><strong>Order '+String(o.id)+'</strong><p>'+new Date(o.created_at).toLocaleString()+' · '+String(o.total_amount||0)+' EGP</p><p>'+String(o.order_status||"")+" · "+String(o.delivery_status||"Pending")+" · "+String(o.payment_status||"")+'</p><p>'+items+'</p></article>';
+   }).join(""):"No orders yet.";
+ };
+ form.onsubmit=async e=>{
+   e.preventDefault();const body=Object.fromEntries(new FormData(form).entries());
+   const r=await fetch("/api/account/profile",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify(body)});
+   const data=await r.json();document.querySelector("#profileMsg").textContent=r.ok?"Details saved.":(data.error||"Could not save details.");
+ };
+ await load();
+ document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();location.href="/";};
+})();
 </script></body></html>
