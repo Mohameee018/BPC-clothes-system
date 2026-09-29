@@ -53,8 +53,11 @@ create table if not exists product_images (
     alt_text text default '',
     sort_order integer not null default 0,
     is_primary boolean not null default false,
+    color text,
     created_at timestamptz not null default now()
 );
+alter table product_images add column if not exists color text;
+create index if not exists ix_product_images_product_color on product_images(product_id,color,sort_order);
 
 create index if not exists ix_product_images_product
     on product_images(product_id, sort_order);
