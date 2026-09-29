@@ -1,0 +1,24 @@
+name: Web syntax check
+
+on:
+  push:
+    paths:
+      - "Cutdown clothes amr/**"
+      - ".github/workflows/web-syntax.yml"
+  pull_request:
+    paths:
+      - "Cutdown clothes amr/**"
+      - ".github/workflows/web-syntax.yml"
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Cutdown clothes amr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check server.js
