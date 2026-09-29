@@ -91,14 +91,15 @@ async function getAuthUser(req){const auth=String(req.headers.authorization||"")
 async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone,brand_id").eq("id",userId).maybeSingle();return data||null}
 async function ensureCustomerForUser(user){
   if(!supabase||!user?.id)return null;
-  const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
+  const profile=await getAuthProfile(user.id); const brandId=String(profile?.brand_id||configuredBrandId());
+  const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
   if(existing.error)throw existing.error;
   if(existing.data)return existing.data;
   const name=String(user.user_metadata?.name||user.raw_user_meta_data?.name||String(user.email||"").split("@")[0]||"Customer").trim();
   const phone=String(user.user_metadata?.phone||user.raw_user_meta_data?.phone||"").trim()||null;
-  const created=await supabase.from("customers").insert({auth_user_id:user.id,name,email:user.email||null,phone}).select("id,name,email,phone,city,address").single();
+  const created=await supabase.from("customers").insert({brand_id:brandId,auth_user_id:user.id,name,email:user.email||null,phone}).select("id,name,email,phone,city,address").single();
   if(created.error){
-    const retry=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
+    const retry=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
     if(retry.data)return retry.data;
     throw created.error;
   }
@@ -134,7 +135,7 @@ app.post("/api/account/profile",async(q,r)=>{
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
  if(!Object.keys(patch).length)return r.status(400).json({error:"No profile changes."});
- const updated=await supabase.from("customers").update(patch).eq("id",customer.id).select("id,name,email,phone,city,address").maybeSingle();
+ const profile=await getAuthProfile(user.id); const updated=await supabase.from("customers").update(patch).eq("id",customer.id).eq("brand_id",String(profile?.brand_id||configuredBrandId())).select("id,name,email,phone,city,address").maybeSingle();
  if(updated.error)return r.status(500).json({error:updated.error.message});if(!updated.data)return r.status(404).json({error:"Customer profile not found."});r.json({customer:updated.data});
 });
 app.get("/api/account/orders",async(q,r)=>{
@@ -151,7 +152,7 @@ app.get("/api/admin/orders",async(q,r)=>{
 });
 app.post("/api/admin/orders/status",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const profile=await getAuthProfile(user.id); if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});
  const {order_id,order_status,delivery_status}=q.body||{};if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
  const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
  const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
