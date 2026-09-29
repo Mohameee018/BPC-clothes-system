@@ -419,7 +419,7 @@ declare
     order_row record;
     item_row record;
 begin
-    select id, customer_id, source, order_status, payment_status, stock_reserved
+    select id, customer_id, source, order_status, payment_status, stock_reserved, total_amount
       into order_row
       from orders
      where id = p_order_id
@@ -446,6 +446,15 @@ begin
 
     if p_disposition not in ('Return to Stock', 'Scrap / Damaged') then
         raise exception 'INVALID_RETURN_DISPOSITION';
+    end if;
+
+    if coalesce(p_refund_amount, 0) < 0
+       or coalesce(p_refund_amount, 0) > coalesce(order_row.total_amount, 0) then
+        raise exception 'INVALID_REFUND_AMOUNT';
+    end if;
+
+    if coalesce(p_loss, 0) < 0 then
+        raise exception 'INVALID_LOSS_AMOUNT';
     end if;
 
     if p_disposition = 'Return to Stock' then
