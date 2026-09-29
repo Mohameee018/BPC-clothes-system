@@ -51,7 +51,19 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
   r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:images.length});
 });
 app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
-  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ const o=await supabase.from("orders").select("*,order_items(*)").eq("source","website").order("created_at",{ascending:false}).limit(100);
+ if(o.error)return r.status(500).json({error:o.error.message});
+ r.json((o.data||[]).map(x=>({...x,customer_name:x.customer_name||"",customer_phone:x.customer_phone||"",order_items:(x.order_items||[]).map(i=>({...i,product_name:i.product_name||"",sku:i.sku||"",category:i.category||"",size:i.size||"",color:i.color||"",cost_price:i.cost_price||0}))})));
+});
+app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
+ if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ const {order_id,order_status,delivery_status}=q.body||{};
+ if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
+ const patch={}; if(order_status)patch.order_status=String(order_status); if(delivery_status)patch.delivery_status=String(delivery_status);
+ const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id").maybeSingle();
+ if(u.error)return r.status(500).json({error:u.error.message}); if(!u.data)return r.status(404).json({error:"Website order not found."}); r.json({ok:true});
+});
   const o=await supabase.from("orders").select("*,order_items(*)").eq("source","website").order("created_at",{ascending:false}).limit(100);
   if(o.error)return r.status(500).json({error:o.error.message});
   r.json(o.data||[]);
