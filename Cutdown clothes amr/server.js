@@ -75,6 +75,10 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {order_id,order_status,delivery_status}=q.body||{};
  if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
+ const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
+ const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
+ if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
+ if(delivery_status&&!deliveryStatuses.includes(String(delivery_status)))return r.status(400).json({error:"Invalid delivery status."});
  const patch={}; if(order_status)patch.order_status=String(order_status); if(delivery_status)patch.delivery_status=String(delivery_status);
  const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id").maybeSingle();
  if(u.error)return r.status(500).json({error:u.error.message}); if(!u.data)return r.status(404).json({error:"Website order not found."}); r.json({ok:true});
