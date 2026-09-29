@@ -21,7 +21,7 @@ function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
 const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
 const configuredBrandId=()=>String(process.env.CUTDOWN_BRAND_ID||DEFAULT_BRAND_ID).trim();
-const base=process.env.PUBLIC_BASE_URL||"",paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
+const paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
 
 async function requireDesktopSync(q,r,next){
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
