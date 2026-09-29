@@ -119,6 +119,32 @@ app.post("/api/desktop/auth/login",async(q,r)=>{
  if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This brand is inactive or unavailable."});}
  r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data});
 });
+async function requireSuperAdmin(req,res){
+ const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
+ const expected=String(process.env.CUTDOWN_SUPER_ADMIN_EMAIL||"").trim().toLowerCase();
+ if(!expected||String(user.email||"").toLowerCase()!==expected)return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
+ return {ok:true,user};
+}
+app.post("/api/admin/brands",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const name=String(q.body?.name||"").trim(),slug=String(q.body?.slug||"").trim().toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");
+ if(!name||!slug)return r.status(400).json({error:"Brand name and slug are required."});
+ const created=await supabase.from("brands").insert({name,slug,website_url:q.body?.website_url||null}).select("id,name,slug,active,website_url").single();
+ if(created.error)return r.status(409).json({error:created.error.message}); r.status(201).json(created.data);
+});
+app.post("/api/admin/brands/account",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const brandId=String(q.body?.brand_id||"").trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim();
+ if(!brandId||!email||!name)return r.status(400).json({error:"brand_id, email and name are required."});
+ const brand=await supabase.from("brands").select("id,name,active").eq("id",brandId).maybeSingle();
+ if(brand.error||!brand.data?.active)return r.status(404).json({error:"Brand not found or inactive."});
+ const password=crypto.randomBytes(12).toString("base64url");
+ const created=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name,brand_id:brandId}});
+ if(created.error)return r.status(409).json({error:created.error.message});
+ const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
+ if(profile.error)return r.status(500).json({error:profile.error.message});
+ r.status(201).json({user_id:created.data.user.id,email,temporary_password:password,brand:brand.data});
+});
 app.get("/api/desktop/update",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Desktop login required."});
  const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
