@@ -161,14 +161,14 @@ async function requireSuperAdmin(req,res){
 app.post("/api/admin/brands",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const name=String(q.body?.name||"").trim(),slug=String(q.body?.slug||"").trim().toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");
- if(!name||!slug)return r.status(400).json({error:"Brand name and slug are required."});
+ if(!name||!slug)return r.status(400).json({error:"Brand name and slug are required."});if(name.length>120||slug.length>80)return r.status(400).json({error:"Brand name or slug is too long."});
  const created=await supabase.from("brands").insert({name,slug,website_url:q.body?.website_url||null}).select("id,name,slug,active,website_url").single();
  if(created.error)return r.status(409).json({error:created.error.message}); r.status(201).json(created.data);
 });
 app.post("/api/admin/brands/account",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const brandId=String(q.body?.brand_id||"").trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim();
- if(!brandId||!email||!name)return r.status(400).json({error:"brand_id, email and name are required."});
+ if(!brandId||!email||!name)return r.status(400).json({error:"brand_id, email and name are required."});if(name.length>120||email.length>254)return r.status(400).json({error:"Invalid account fields."});
  const brand=await supabase.from("brands").select("id,name,active").eq("id",brandId).maybeSingle();
  if(brand.error||!brand.data?.active)return r.status(404).json({error:"Brand not found or inactive."});
  const password=crypto.randomBytes(12).toString("base64url");
@@ -189,7 +189,7 @@ app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.stat
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 
 async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return null;return {user,profile};}
-app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:profile.brand_id})});
+app.get("/api/admin/ping",async(q,r)=>{const admin=await requireBrandAdmin(q,r);if(!admin)return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:admin.profile.brand_id})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  const accountProfile=await getAuthProfile(user.id); if(!accountProfile?.brand_id||String(accountProfile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
