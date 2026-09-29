@@ -7,9 +7,55 @@ import {fileURLToPath} from "node:url";
 import {createClient} from "@supabase/supabase-js";
 dotenv.config();
 const __dirname=path.dirname(fileURLToPath(import.meta.url)),app=express();
-app.use(cors());app.use(express.json({limit:"1mb"}));app.use(express.static(__dirname));
+app.use(cors());app.use(express.json({limit:"12mb"}));app.use(express.static(__dirname));
 const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY):null;
 const base=process.env.PUBLIC_BASE_URL||"",paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
+
+function requireDesktopSync(q,r,next){
+  const expected=process.env.CUTDOWN_DESKTOP_SYNC_TOKEN;
+  if(!expected)return r.status(503).json({error:"Desktop sync is not configured."});
+  const got=String(q.headers.authorization||"").replace(/^Bearer\\s+/i,"");
+  if(!got||got!==expected)return r.status(401).json({error:"Unauthorized desktop sync request."});
+  next();
+}
+function safeFileName(name){return String(name||"image").toLowerCase().replace(/[^a-z0-9._-]+/g,"-").slice(-120)||"image";}
+function extFromMime(mime){const m=String(mime||"").toLowerCase();return m.includes("png")?"png":m.includes("webp")?"webp":m.includes("gif")?"gif":"jpg";}
+app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
+  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+  const p=q.body?.product;
+  if(!p?.desktop_id||!p?.name)return r.status(400).json({error:"product.desktop_id and product.name are required."});
+  const productRow={desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price:Number(p.price||0),cost_price:Number(p.cost_price||0),stock:Math.max(0,Number(p.stock||0)),minimum_stock:Math.max(0,Number(p.minimum_stock||0)),active:p.active!==false,is_active:p.active!==false};
+  const up=await supabase.from("products").upsert(productRow,{onConflict:"desktop_id"}).select().single();
+  if(up.error)return r.status(500).json({error:up.error.message});
+  const productId=up.data.id;
+  const variants=Array.isArray(p.variants)?p.variants:[];
+  if(variants.length){const rows=variants.map(v=>({desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"desktop_variant_id"});if(vu.error)return r.status(500).json({error:vu.error.message});}
+  const images=Array.isArray(p.images)?p.images.slice(0,50):[];
+  if(images.length){
+    const old=await supabase.from("product_images").select("storage_path").eq("product_id",productId);
+    if(old.data?.length)await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));
+    await supabase.from("product_images").delete().eq("product_id",productId);
+    const imageRows=[];
+    for(const img of images.slice(0,30)){
+      if(!img.data_base64)continue;
+      const ext=extFromMime(img.mime_type),color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
+      const path="desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
+      const bytes=Buffer.from(String(img.data_base64),"base64");
+      const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:img.mime_type||"image/"+ext,upsert:true});
+      if(upImg.error)return r.status(500).json({error:upImg.error.message});
+      const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+      imageRows.push({product_id:productId,storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
+    }
+    if(imageRows.length){const ii=await supabase.from("product_images").insert(imageRows);if(ii.error)return r.status(500).json({error:ii.error.message});}
+  }
+  r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:images.length});
+});
+app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
+  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+  const o=await supabase.from("orders").select("*,order_items(*)").order("created_at",{ascending:false}).limit(100);
+  if(o.error)return r.status(500).json({error:o.error.message});
+  r.json(o.data||[]);
+});
 app.get("/api/health",(_q,r)=>r.json({ok:true,supabase:!!supabase,paymentConfigured:!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET)}));
 app.get("/api/products",async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
