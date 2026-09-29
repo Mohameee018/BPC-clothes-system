@@ -14,7 +14,7 @@ const base=process.env.PUBLIC_BASE_URL||"",paymobBase=process.env.PAYMOB_BASE_UR
 function requireDesktopSync(q,r,next){
   const expected=process.env.CUTDOWN_DESKTOP_SYNC_TOKEN;
   if(!expected)return r.status(503).json({error:"Desktop sync is not configured."});
-  const got=String(q.headers.authorization||"").replace(/^Bearer\\s+/i,"");
+  const got=String(q.headers.authorization||"").replace(/^Bearer\s+/i,"");
   if(!got||got!==expected)return r.status(401).json({error:"Unauthorized desktop sync request."});
   next();
 }
@@ -85,10 +85,6 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id").maybeSingle();
  if(u.error)return r.status(500).json({error:u.error.message}); if(!u.data)return r.status(404).json({error:"Website order not found."}); r.json({ok:true});
 });
-  const o=await supabase.from("orders").select("*,order_items(*)").eq("source","website").order("created_at",{ascending:false}).limit(100);
-  if(o.error)return r.status(500).json({error:o.error.message});
-  r.json(o.data||[]);
-});
 app.get("/api/health",async(_q,r)=>{const paymentConfigured=!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET);if(!supabase)return r.status(503).json({ok:false,supabase:false,paymentConfigured});const probe=await supabase.from("products").select("id").limit(1);if(probe.error)return r.status(503).json({ok:false,supabase:false,paymentConfigured});r.json({ok:true,supabase:true,paymentConfigured});});
 app.get("/api/products",async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
@@ -134,7 +130,7 @@ app.post("/api/orders",async(q,r)=>{
  const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id})));if(ie){if(variantReservation.length)await supabase.rpc("release_variant_stock",{p_items:variantReservation});await supabase.from("orders").delete().eq("id",order.id);return r.status(500).json({error:ie.message})}
  if(payment_method==="cod"){await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id);return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."})}
  if(!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET&&base))return r.status(503).json({error:"Online payment is not configured yet. Add Supabase + Paymob variables in Railway."});
- const amountCents=Math.round(total*100),parts=customer.name.trim().split(/\\s+/),first=parts[0]||"Customer",last=parts.slice(1).join(" ")||"Customer";
+ const amountCents=Math.round(total*100),parts=customer.name.trim().split(/\s+/),first=parts[0]||"Customer",last=parts.slice(1).join(" ")||"Customer";
  const pay=await fetch(paymobBase+"/v1/intention/",{method:"POST",headers:{"Authorization":"Token "+process.env.PAYMOB_SECRET_KEY,"Content-Type":"application/json"},body:JSON.stringify({amount:amountCents,currency:"EGP",payment_methods:[Number(process.env.PAYMOB_INTEGRATION_ID)],items:clean.map(i=>({name:i.product_name,amount:Math.round(Number(i.unit_price)*100),description:"Cutdown product",quantity:i.quantity})),billing_data:{first_name:first,last_name:last,email:customer.email||"no-email@cutdown.store",phone_number:customer.phone,apartment:"NA",building:"NA",street:customer.address,floor:"NA",city:customer.city||"Cairo",state:customer.city||"Cairo",country:"EGY"},special_reference:order.id,expiration:3600,notification_url:base+"/api/paymob/webhook",redirection_url:base+"/payment-result?order_id="+encodeURIComponent(order.id)})});
  const pd=await pay.json();if(!pay.ok)return r.status(502).json({error:"Payment provider rejected the request.",details:pd});const checkoutUrl=paymobBase+"/unifiedcheckout/?publicKey="+encodeURIComponent(process.env.PAYMOB_PUBLIC_KEY)+"&clientSecret="+encodeURIComponent(pd.client_secret);r.status(201).json({order_id:order.id,payment_required:true,checkout_url:checkoutUrl});
 });
