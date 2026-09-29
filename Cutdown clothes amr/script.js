@@ -43,7 +43,7 @@ function renderProductView(){
 }
 function renderProducts(){
  const el=$("#products");
- el.innerHTML=state.products.map((p,i)=>'<article class="product"><button class="product-open" data-product="'+esc(p.id)+'"><img src="'+esc(p.image_url||colorImages(p,"")[0])+'" alt="'+esc(p.name)+'"><div class="product-info"><span>0'+(i+1)+'</span><h3>'+esc(p.name)+'</h3><p>'+money(p.price)+'</p><span class="product-cta">View product →</span></div></button></article>').join("");
+ el.innerHTML=state.products.map((p,i)=>'<article class="product"><button class="product-open" data-product="'+esc(p.id)+'"><img src="'+esc(p.image_url||colorImages(p,"")[0])+'" alt="'+esc(p.name)+'"><div class="product-info"><span>0'+(i+1)+'</span><h3>'+esc(p.name)+'</h3><p>'+money(p.price)+'</p><span class="product-cta">Add Product →</span></div></button></article>').join("");
  el.querySelectorAll("[data-product]").forEach(b=>b.onclick=()=>openProduct(b.dataset.product));
 }
 function addSelectedProduct(){
