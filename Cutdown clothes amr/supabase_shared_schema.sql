@@ -499,3 +499,151 @@ begin
 end;
 $$;
 
+-- =========================================================
+-- AUTH / CUSTOMER ACCOUNT INTEGRATION
+-- =========================================================
+create table if not exists public.profiles (
+    id uuid primary key references auth.users(id) on delete cascade,
+    role text not null default 'customer' check (role in ('customer','admin')),
+    name text,
+    phone text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    insert into public.profiles(id,name,phone)
+    values(new.id,new.raw_user_meta_data->>'name',new.raw_user_meta_data->>'phone')
+    on conflict (id) do nothing;
+    return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_user();
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+
+create schema if not exists private;
+
+create or replace function private.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select exists(
+        select 1 from public.profiles
+        where id=(select auth.uid()) and role='admin'
+    );
+$$;
+revoke all on function private.is_admin() from public;
+grant execute on function private.is_admin() to authenticated;
+
+drop policy if exists "profiles own or admin select" on public.profiles;
+create policy "profiles own or admin select"
+on public.profiles for select to authenticated
+using ((select auth.uid())=id or private.is_admin());
+
+drop policy if exists "profiles own update" on public.profiles;
+create policy "profiles own update"
+on public.profiles for update to authenticated
+using ((select auth.uid())=id)
+with check ((select auth.uid())=id);
+
+alter table public.customers add column if not exists auth_user_id uuid references auth.users(id) on delete set null;
+create unique index if not exists idx_customers_auth_user_id
+on public.customers(auth_user_id) where auth_user_id is not null;
+
+create or replace function public.link_customer_to_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if new.email is not null then
+        update public.customers
+        set auth_user_id=new.id, updated_at=now()
+        where auth_user_id is null and lower(email)=lower(new.email);
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_link_customer on auth.users;
+create trigger on_auth_user_link_customer
+after insert on auth.users
+for each row execute function public.link_customer_to_auth_user();
+revoke all on function public.link_customer_to_auth_user() from public, anon, authenticated;
+
+create or replace function public.claim_customer_for_auth()
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare cid uuid;
+begin
+    select id into cid from public.customers
+    where auth_user_id=(select auth.uid()) limit 1;
+    if cid is not null then return cid; end if;
+
+    update public.customers
+    set auth_user_id=(select auth.uid()), updated_at=now()
+    where id=(
+        select id from public.customers
+        where auth_user_id is null and email is not null
+          and lower(email)=lower((select email from auth.users where id=(select auth.uid())))
+        order by created_at limit 1
+    )
+    returning id into cid;
+    return cid;
+end;
+$$;
+revoke all on function public.claim_customer_for_auth() from public, anon;
+grant execute on function public.claim_customer_for_auth() to authenticated;
+
+drop policy if exists "customer read own profile" on public.customers;
+create policy "customer read own profile"
+on public.customers for select to authenticated
+using (auth_user_id=(select auth.uid()) or private.is_admin());
+
+drop policy if exists "customer update own profile" on public.customers;
+create policy "customer update own profile"
+on public.customers for update to authenticated
+using (auth_user_id=(select auth.uid()) or private.is_admin())
+with check (auth_user_id=(select auth.uid()) or private.is_admin());
+
+drop policy if exists "customer read own orders" on public.orders;
+create policy "customer read own orders"
+on public.orders for select to authenticated
+using (
+    customer_id in (select id from public.customers where auth_user_id=(select auth.uid()))
+    or private.is_admin()
+);
+
+drop policy if exists "customer read own order items" on public.order_items;
+create policy "customer read own order items"
+on public.order_items for select to authenticated
+using (
+    order_id in (
+        select id from public.orders
+        where customer_id in (select id from public.customers where auth_user_id=(select auth.uid()))
+    )
+    or private.is_admin()
+);
+
+-- Delivery state used by both the website admin and Java desktop.
+alter table orders add column if not exists delivery_status text not null default 'Pending';
+create index if not exists idx_orders_delivery_status on orders(delivery_status);
