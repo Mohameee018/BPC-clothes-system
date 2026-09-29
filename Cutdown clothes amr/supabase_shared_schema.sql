@@ -133,6 +133,7 @@ alter table orders add column if not exists customer_id uuid references customer
 alter table orders add column if not exists source text not null default 'website';
 alter table orders add column if not exists shipping_amount numeric(10,2) not null default 0;
 alter table orders add column if not exists updated_at timestamptz not null default now();
+alter table orders add column if not exists stock_reserved boolean not null default false;
 
 create unique index if not exists ux_orders_desktop_id
     on orders(desktop_id) where desktop_id is not null;
