@@ -162,7 +162,7 @@ app.post("/api/admin/brands/account",async(q,r)=>{
  const brand=await supabase.from("brands").select("id,name,active").eq("id",brandId).maybeSingle();
  if(brand.error||!brand.data?.active)return r.status(404).json({error:"Brand not found or inactive."});
  const password=crypto.randomBytes(12).toString("base64url");
- const created=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name,brand_id:brandId}});
+ const created=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name}});
  if(created.error)return r.status(409).json({error:created.error.message});
  const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
  if(profile.error)return r.status(500).json({error:profile.error.message});
