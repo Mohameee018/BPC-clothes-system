@@ -5,10 +5,68 @@ const state={products:[],cart:JSON.parse(localStorage.getItem("cutdown_cart")||"
 function money(v){return "EGP "+Number(v||0).toLocaleString("en-EG",{maximumFractionDigits:2})}
 function save(){localStorage.setItem("cutdown_cart",JSON.stringify(state.cart));renderCart()}
 function syncPaymentUI(){document.querySelectorAll(".payment label").forEach(l=>l.classList.toggle("is-selected",l.querySelector("input")?.checked));}
-function renderProducts(){const el=$("#products");el.innerHTML=state.products.map((p,i)=>'<article class="product"><img src="'+(p.image_url||"assets/t shirt cutdown.jpeg")+'" alt="'+p.name+'"><div class="product-info"><span>0'+(i+1)+'</span><h3>'+p.name+'</h3><p>'+money(p.price)+'</p><button data-add="'+p.id+'">Add to bag</button></div></article>').join("");el.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>{const id=b.dataset.add,found=state.cart.find(x=>x.product_id===id);if(found)found.quantity++;else state.cart.push({product_id:id,quantity:1});save();openCart()})}
-function renderCart(){const el=$("#cartItems");$("#cartCount").textContent=state.cart.reduce((n,x)=>n+x.quantity,0);let total=0;el.innerHTML=state.cart.map(x=>{const p=state.products.find(y=>y.id===x.product_id);if(!p)return "";total+=Number(p.price)*x.quantity;return '<div class="cart-item"><span>'+p.name+" × "+x.quantity+'</span><b>'+money(Number(p.price)*x.quantity)+'</b></div>'}).join("")||'<p style="color:#777">Your bag is empty.</p>';$("#cartTotal").textContent=money(total)}
+let productView=null;
+function esc(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function productColors(p){return [...new Set((p.variants||[]).map(v=>String(v.color||"").trim()).filter(Boolean))]}
+function productSizes(p,color){return [...new Set((p.variants||[]).filter(v=>!color||v.color===color).map(v=>String(v.size||"").trim()).filter(Boolean))]}
+function colorImages(p,color){
+ const imgs=(p.images||[]).filter(x=>!color||!x.color||x.color===color).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+ if(imgs.length)return imgs.map(x=>x.public_url||x.storage_path).filter(Boolean).slice(0,3);
+ const fallback=p.image_url?[p.image_url] : ["assets/t shirt cutdown.jpeg"];
+ return fallback;
+}
+function findVariant(p,color,size){return (p.variants||[]).find(v=>String(v.color||"")===String(color||"")&&String(v.size||"")===String(size||""))}
+function openProduct(id){
+ const p=state.products.find(x=>x.id===id);if(!p)return;
+ const colors=productColors(p),firstColor=colors[0]||"",sizes=productSizes(p,firstColor),firstSize=sizes[0]||"";
+ productView={p,color:firstColor,size:firstSize,quantity:1};
+ $("#productName").textContent=p.name;$("#productPrice").textContent=money(p.price);
+ $("#productDescription").textContent=p.description||"";
+ $("#productModal").classList.add("open");renderProductView();
+}
+function renderProductView(){
+ if(!productView)return;
+ const {p,color,size}=productView,imgs=colorImages(p,color);
+ $("#productMainImage").src=imgs[0]||"assets/t shirt cutdown.jpeg";$("#productMainImage").alt=p.name+" "+color;
+ $("#productThumbs").innerHTML=imgs.map((src,i)=>'<button type="button" class="product-thumb '+(i===0?"active":"")+'" data-img="'+esc(src)+'"><img src="'+esc(src)+'" alt=""></button>').join("");
+ $("#productThumbs").querySelectorAll("[data-img]").forEach(b=>b.onclick=()=>{$("#productMainImage").src=b.dataset.img;$("#productThumbs").querySelectorAll(".product-thumb").forEach(x=>x.classList.remove("active"));b.classList.add("active")});
+ const colors=productColors(p);
+ $("#colorChoices").innerHTML=colors.length?colors.map(c=>'<button type="button" class="choice '+(c===color?"selected":"")+'" data-color="'+esc(c)+'">'+esc(c)+'</button>').join(""):'<span class="choice-empty">No colors configured</span>';
+ $("#colorChoices").querySelectorAll("[data-color]").forEach(b=>b.onclick=()=>{productView.color=b.dataset.color;productView.size=productSizes(p,productView.color)[0]||"";productView.quantity=1;renderProductView()});
+ const sizes=productSizes(p,color);
+ $("#sizeChoices").innerHTML=sizes.length?sizes.map(s=>{const v=findVariant(p,color,s);return '<button type="button" class="choice '+(s===size?"selected":"")+(v&&Number(v.stock)>0?"":" disabled")+'" data-size="'+esc(s)+'">'+esc(s)+'</button>'}).join(""):'<span class="choice-empty">No sizes configured</span>';
+ $("#sizeChoices").querySelectorAll("[data-size]").forEach(b=>b.onclick=()=>{if(b.classList.contains("disabled"))return;productView.size=b.dataset.size;productView.quantity=1;renderProductView()});
+ const v=findVariant(p,color,size),stock=v?Number(v.stock):0,max=Math.max(0,stock);
+ $("#qtyValue").textContent=productView.quantity;$("#variantStock").textContent=v?(stock>0?stock+" available":"SOLD OUT"):"Select a size";
+ $("#addProductToCart").disabled=!v||stock<=0;
+ $("#productMsg").textContent=v&&stock>0?"":"Choose an available color and size.";
+}
+function renderProducts(){
+ const el=$("#products");
+ el.innerHTML=state.products.map((p,i)=>'<article class="product"><button class="product-open" data-product="'+esc(p.id)+'"><img src="'+esc(p.image_url||colorImages(p,"")[0])+'" alt="'+esc(p.name)+'"><div class="product-info"><span>0'+(i+1)+'</span><h3>'+esc(p.name)+'</h3><p>'+money(p.price)+'</p><span class="product-cta">View product →</span></div></button></article>').join("");
+ el.querySelectorAll("[data-product]").forEach(b=>b.onclick=()=>openProduct(b.dataset.product));
+}
+function addSelectedProduct(){
+ if(!productView)return;
+ const {p,color,size,quantity}=productView,v=findVariant(p,color,size),stock=v?Number(v.stock):0;
+ if(!v||stock<=0||quantity>stock)return;
+ const key=p.id+"|"+color+"|"+size;
+ const found=state.cart.find(x=>x.key===key);
+ if(found)found.quantity=Math.min(stock,found.quantity+quantity);
+ else state.cart.push({key,product_id:p.id,variant_id:v.id,color,size,quantity});
+ save();$("#productModal").classList.remove("open");openCart();
+}
+function renderCart(){
+ const el=$("#cartItems");$("#cartCount").textContent=state.cart.reduce((n,x)=>n+x.quantity,0);let total=0;
+ el.innerHTML=state.cart.map(x=>{const p=state.products.find(y=>y.id===x.product_id);if(!p)return "";total+=Number(p.price)*x.quantity;return '<div class="cart-item"><span>'+esc(p.name)+' · '+esc(x.color||"")+" / "+esc(x.size||"")+" × "+x.quantity+'</span><b>'+money(Number(p.price)*x.quantity)+'</b></div>'}).join("")||'<p style="color:#777">Your bag is empty.</p>';$("#cartTotal").textContent=money(total);
+}
 function openCart(){$("#cart").classList.add("open")}function closeCart(){$("#cart").classList.remove("open")}
-$("#cartBtn").onclick=openCart;$("#closeCart").onclick=closeCart;$("#checkoutBtn").onclick=()=>{if(!state.cart.length)return;closeCart();$("#checkout").classList.add("open")};$("#closeCheckout").onclick=()=>$("#checkout").classList.remove("open");
+$("#cartBtn").onclick=openCart;$("#closeCart").onclick=closeCart;
+$("#closeProduct").onclick=()=>$("#productModal").classList.remove("open");
+$("#productModal").addEventListener("click",e=>{if(e.target.id==="productModal")e.currentTarget.classList.remove("open")});
+$("#qtyMinus").onclick=()=>{if(productView){productView.quantity=Math.max(1,productView.quantity-1);renderProductView()}};
+$("#qtyPlus").onclick=()=>{if(productView){const v=findVariant(productView.p,productView.color,productView.size);productView.quantity=Math.min(Number(v?.stock||1),productView.quantity+1);renderProductView()}};
+$("#addProductToCart").onclick=addSelectedProduct;$("#checkoutBtn").onclick=()=>{if(!state.cart.length)return;closeCart();$("#checkout").classList.add("open")};$("#closeCheckout").onclick=()=>$("#checkout").classList.remove("open");
 async function loadReviews(){try{const r=await fetchWithTimeout("/api/reviews");if(!r.ok)throw 0;const data=await r.json();$("#reviewList").innerHTML=data.length?data.map(x=>'<article class="review"><div class="stars">'+("★".repeat(x.rating))+'</div><h3>'+String(x.name).replace(/[<>]/g,"")+'</h3><p>'+String(x.body).replace(/[<>]/g,"")+'</p></article>').join(""):'<p>No reviews yet. Be the first.</p>'}catch{$("#reviewList").innerHTML='<p>Reviews will appear here once Supabase is connected.</p>'}}
 document.querySelectorAll('input[name="payment_method"]').forEach(r=>r.addEventListener("change",syncPaymentUI));
 $("#reviewForm").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),r=await fetch("/api/reviews",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(f))}),d=await r.json();if(!r.ok)return alert(d.error||"Could not post review");e.currentTarget.reset();loadReviews()};
