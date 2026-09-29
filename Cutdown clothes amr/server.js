@@ -91,6 +91,33 @@ async function getAuthProfile(userId){if(!supabase||!userId)return null;const {d
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL||!process.env.SUPABASE_PUBLISHABLE_KEY)return r.status(503).json({error:"Supabase public auth is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:process.env.SUPABASE_PUBLISHABLE_KEY})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true})});
+app.get("/api/account/orders",async(q,r)=>{
+ const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ const customer=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
+ if(customer.error)return r.status(500).json({error:customer.error.message});
+ if(!customer.data)return r.json({customer:null,orders:[]});
+ const orders=await supabase.from("orders").select("*,order_items(*)").eq("customer_id",customer.data.id).order("created_at",{ascending:false}).limit(50);
+ if(orders.error)return r.status(500).json({error:orders.error.message});
+ r.json({customer:customer.data,orders:orders.data||[]});
+});
+app.get("/api/admin/orders",async(q,r)=>{
+ const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});
+ const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("source","website").order("created_at",{ascending:false}).limit(100);
+ if(orders.error)return r.status(500).json({error:orders.error.message});
+ r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
+});
+app.post("/api/admin/orders/status",async(q,r)=>{
+ const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});
+ const {order_id,order_status,delivery_status}=q.body||{};
+ if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
+ const patch={}; if(order_status)patch.order_status=String(order_status); if(delivery_status)patch.delivery_status=String(delivery_status);
+ const updated=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
+ if(updated.error)return r.status(500).json({error:updated.error.message});
+ if(!updated.data)return r.status(404).json({error:"Website order not found."});
+ r.json({ok:true,order:updated.data});
+});
 app.get("/api/health",async(_q,r)=>{const paymentConfigured=!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET);if(!supabase)return r.status(503).json({ok:false,supabase:false,paymentConfigured});const probe=await supabase.from("products").select("id").limit(1);if(probe.error)return r.status(503).json({ok:false,supabase:false,paymentConfigured});r.json({ok:true,supabase:true,paymentConfigured});});
 app.get("/api/products",async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
