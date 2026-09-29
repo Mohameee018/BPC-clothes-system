@@ -346,3 +346,43 @@ as $$
         select stock <= 0 from products where id = p_product_id
     ), true);
 $$;
+
+
+-- =========================================================
+-- ATOMIC VARIANT STOCK RESERVATION
+-- =========================================================
+create or replace function reserve_variant_stock(p_items jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare item_row jsonb; v_id uuid; qty integer; current_stock integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := (item_row->>'variant_id')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    select stock into current_stock from product_variants where id=v_id and active=true for update;
+    if not found or current_stock < qty then
+      raise exception 'INSUFFICIENT_VARIANT_STOCK:%',v_id using errcode='P0001';
+    end if;
+    update product_variants set stock=stock-qty, updated_at=now() where id=v_id;
+  end loop;
+end;
+$$;
+
+create or replace function release_variant_stock(p_items jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare item_row jsonb; v_id uuid; qty integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := (item_row->>'variant_id')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    update product_variants set stock=stock+qty, updated_at=now() where id=v_id;
+  end loop;
+end;
+$$;
