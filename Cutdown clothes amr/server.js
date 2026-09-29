@@ -42,11 +42,13 @@ async function requireDesktopSync(q,r,next){
 }
 function safeFileName(name){return String(name||"image").toLowerCase().replace(/[^a-z0-9._-]+/g,"-").slice(-120)||"image";}
 function extFromMime(mime){const m=String(mime||"").toLowerCase();return m.includes("png")?"png":m.includes("webp")?"webp":m.includes("gif")?"gif":"jpg";}
-app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
+app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPrefix:"desktop-sync"}),requireDesktopSync,async(q,r)=>{
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
   const p=q.body?.product;
   if(!p?.desktop_id||!p?.name)return r.status(400).json({error:"product.desktop_id and product.name are required."});
-  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price:Number(p.price||0),cost_price:Number(p.cost_price||0),stock:Math.max(0,Number(p.stock||0)),minimum_stock:Math.max(0,Number(p.minimum_stock||0)),active:p.active!==false,is_active:p.active!==false};
+  const price=Number(p.price||0),costPrice=Number(p.cost_price||0),stock=Number(p.stock||0),minimumStock=Number(p.minimum_stock||0);
+  if(!Number.isFinite(price)||price<0||!Number.isFinite(costPrice)||costPrice<0||!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(minimumStock)||minimumStock<0)return r.status(400).json({error:"Invalid product pricing or stock."});
+  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
   const up=await supabase.from("products").upsert(productRow,{onConflict:"brand_id,desktop_id"}).select().single();
   if(up.error)return r.status(500).json({error:"Internal server error."});
   const productId=up.data.id;
