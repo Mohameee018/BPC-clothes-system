@@ -98,7 +98,7 @@ async function getAuthUser(req){const auth=String(req.headers.authorization||"")
 async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone,brand_id").eq("id",userId).maybeSingle();return data||null}
 async function ensureCustomerForUser(user){
   if(!supabase||!user?.id)return null;
-  const profile=await getAuthProfile(user.id); const brandId=String(profile?.brand_id||configuredBrandId());
+  const profile=await getAuthProfile(user.id); if(!profile?.brand_id)throw new Error("This account is not assigned to a brand."); const brandId=String(profile.brand_id);
   const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
   if(existing.error)throw existing.error;
   if(existing.data)return existing.data;
