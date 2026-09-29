@@ -398,3 +398,94 @@ alter table orders add column if not exists customer_id uuid references customer
 alter table orders add column if not exists source text not null default 'desktop';
 create index if not exists idx_orders_customer_id on orders(customer_id);
 create index if not exists idx_orders_source on orders(source);
+
+
+-- =========================================================
+-- ATOMIC WHOLE-ORDER RETURN
+-- =========================================================
+create or replace function process_whole_order_return(
+    p_order_id uuid,
+    p_reason text,
+    p_disposition text,
+    p_refund_amount numeric,
+    p_loss numeric
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    order_row record;
+    item_row record;
+begin
+    select id, customer_id, source
+      into order_row
+      from orders
+     where id = p_order_id
+       and source = 'website'
+     for update;
+
+    if not found then
+        raise exception 'WEBSITE_ORDER_NOT_FOUND';
+    end if;
+
+    -- One canonical return transaction per website order.
+    if exists (select 1 from returns where order_id = p_order_id) then
+        return false;
+    end if;
+
+    if p_disposition not in ('Return to Stock', 'Scrap / Damaged') then
+        raise exception 'INVALID_RETURN_DISPOSITION';
+    end if;
+
+    if p_disposition = 'Return to Stock' then
+        for item_row in
+            select variant_id, product_id, quantity
+              from order_items
+             where order_id = p_order_id
+        loop
+            if item_row.variant_id is not null then
+                update product_variants
+                   set stock = stock + item_row.quantity,
+                       updated_at = now()
+                 where id = item_row.variant_id;
+
+                update inventory
+                   set quantity = quantity + item_row.quantity,
+                       updated_at = now()
+                 where variant_id = item_row.variant_id;
+            else
+                update products
+                   set stock = stock + item_row.quantity
+                 where id = item_row.product_id;
+            end if;
+        end loop;
+    end if;
+
+    insert into returns (
+        desktop_id, order_id, customer_id, return_type,
+        reason, disposition, refund_amount, loss, processed_at
+    )
+    values (
+        'website-return:' || p_order_id::text,
+        p_order_id,
+        order_row.customer_id,
+        'whole_order',
+        coalesce(p_reason, ''),
+        p_disposition,
+        greatest(0, coalesce(p_refund_amount, 0)),
+        greatest(0, coalesce(p_loss, 0)),
+        now()
+    );
+
+    update orders
+       set delivery_status = 'Returned',
+           order_status = 'Not Prepared',
+           updated_at = now()
+     where id = p_order_id;
+
+    return true;
+end;
+$$;
+
