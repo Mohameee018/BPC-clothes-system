@@ -1,1 +1,49 @@
-{"name":"cutdown-store","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.js"},"dependencies":{"@supabase/supabase-js":"^2.117.2","express":"^5.1.0","cors":"^2.8.5","dotenv":"^17.2.2","compression":"^1.8.2"},"engines":{"node":">=22"}}
+{
+  "name": "cutdown-store",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "compression": "^1.8.2"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.bpc.clothes",
+    "productName": "BPC Clothes System",
+    "artifactName": "BPC-Clothes-System-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/.cache/**",
+      "!dist/**",
+      "!supabase*.sql",
+      "!.env",
+      "!.env.*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "BPC Clothes System"
+    }
+  }
+}
