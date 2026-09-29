@@ -1,0 +1,59 @@
+name: Build BPC Clothes System Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cutdown clothes amr/**"
+      - ".github/workflows/build-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Cutdown clothes amr
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: "Cutdown clothes amr/package.json"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Windows installer
+        run: npm run dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BPC-Clothes-System-Installer
+          path: "Cutdown clothes amr/dist/BPC-Clothes-System-Setup-*.exe"
+          if-no-files-found: error
+
+      - name: Publish GitHub release asset
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          $tag = "v$version"
+          $asset = Get-ChildItem -Path "dist/BPC-Clothes-System-Setup-*.exe" | Select-Object -First 1
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag $asset.FullName --title "BPC Clothes System $version" --notes "Windows installer for BPC Clothes System."
+          } else {
+            gh release upload $tag $asset.FullName --clobber
+          }
