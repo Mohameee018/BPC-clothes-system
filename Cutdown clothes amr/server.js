@@ -114,25 +114,19 @@ async function getAuthUser(req){const auth=String(req.headers.authorization||"")
 async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone,brand_id").eq("id",userId).maybeSingle();return data||null}
 async function ensureCustomerForUser(user){
   if(!supabase||!user?.id)return null;
-  const profile=await getAuthProfile(user.id); if(!profile?.brand_id)throw new Error("This account is not assigned to a brand."); const brandId=String(profile.brand_id);
+  const profile=await getAuthProfile(user.id);
+  if(!profile?.brand_id)throw new Error("This account is not assigned to a brand.");
+  const brandId=String(profile.brand_id);
   const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
   if(existing.error)throw existing.error;
   if(existing.data)return existing.data;
-  const profileBrand=String(profile?.brand_id||"").trim();
-  if(!profileBrand)return null;
-  const brand=await supabase.from("brands").select("id,active").eq("id",profileBrand).maybeSingle();
-  if(brand.error||!brand.data?.active)return null;
-  const name=String(user.user_metadata?.name||user.raw_user_meta_data?.name||String(user.email||"").split("@")[0]||"Customer").trim();
-  const phone=String(user.user_metadata?.phone||user.raw_user_meta_data?.phone||"").trim()||null;
-  const created=await supabase.from("customers").insert({brand_id:brandId,auth_user_id:user.id,name,email:user.email||null,phone}).select("id,name,email,phone,city,address").single();
-  if(created.error){
-    const retry=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
-    if(retry.data)return retry.data;
-    throw created.error;
-  }
-  return created.data;
-}
-const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
+  const claimed=await supabase.rpc("claim_customer_for_auth");
+  if(claimed.error)throw claimed.error;
+  if(!claimed.data)return null;
+  const linked=await supabase.from("customers").select("id,name,email,phone,city,address").eq("id",claimed.data).eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
+  if(linked.error)throw linked.error;
+  return linked.data||null;
+}const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
@@ -206,7 +200,7 @@ app.post("/api/account/profile",async(q,r)=>{
 });
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:e.message||"Could not load customer profile."})}
+ let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
  const profile=await getAuthProfile(user.id); if(!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
  const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String(profile.brand_id)).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json({customer,orders:orders.data||[]});
