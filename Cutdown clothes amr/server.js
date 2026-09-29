@@ -38,7 +38,7 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
   if(up.error)return r.status(500).json({error:up.error.message});
   const productId=up.data.id;
   const variants=Array.isArray(p.variants)?p.variants:[];
-  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"desktop_variant_id"});if(vu.error)return r.status(500).json({error:vu.error.message});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:stale.error.message});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:clear.error.message});}
+  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"desktop_variant_id"});if(vu.error)return r.status(500).json({error:vu.error.message});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:stale.error.message});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:clear.error.message});}
   const images=Array.isArray(p.images)?p.images.slice(0,50):[];
   if(images.length || p.images){
     const old=await supabase.from("product_images").select("storage_path").eq("brand_id",q.brandId).eq("product_id",productId);
@@ -59,7 +59,7 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
   }
   r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:images.length});
 });
-app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
+app.get("/api/desktop/orders",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const o=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",q.brandId).eq("source","website").order("created_at",{ascending:false}).limit(100);
  if(o.error)return r.status(500).json({error:o.error.message});
@@ -113,7 +113,6 @@ async function ensureCustomerForUser(user){
   return created.data;
 }
 const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
-const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 app.post("/api/desktop/auth/login",async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
