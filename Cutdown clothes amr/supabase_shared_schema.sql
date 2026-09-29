@@ -387,3 +387,14 @@ begin
   end loop;
 end;
 $$;
+
+
+-- Website/Desktop customer and order linkage migration
+alter table customers add column if not exists email text;
+alter table customers add column if not exists city text;
+alter table customers add column if not exists address text;
+alter table customers add column if not exists updated_at timestamptz not null default now();
+alter table orders add column if not exists customer_id uuid references customers(id) on delete set null;
+alter table orders add column if not exists source text not null default 'desktop';
+create index if not exists idx_orders_customer_id on orders(customer_id);
+create index if not exists idx_orders_source on orders(source);
