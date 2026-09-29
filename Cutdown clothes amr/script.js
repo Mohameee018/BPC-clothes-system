@@ -58,7 +58,9 @@ function addSelectedProduct(){
 }
 function renderCart(){
  const el=$("#cartItems");$("#cartCount").textContent=state.cart.reduce((n,x)=>n+x.quantity,0);let total=0;
- el.innerHTML=state.cart.map(x=>{const p=state.products.find(y=>y.id===x.product_id);if(!p)return "";total+=Number(p.price)*x.quantity;return '<div class="cart-item"><span>'+esc(p.name)+' · '+esc(x.color||"")+" / "+esc(x.size||"")+" × "+x.quantity+'</span><b>'+money(Number(p.price)*x.quantity)+'</b></div>'}).join("")||'<p style="color:#777">Your bag is empty.</p>';$("#cartTotal").textContent=money(total);
+ el.innerHTML=state.cart.map(x=>{const p=state.products.find(y=>y.id===x.product_id);if(!p)return "";total+=Number(p.price)*x.quantity;return '<div class="cart-item"><div class="cart-item-main"><span>'+esc(p.name)+' · '+esc(x.color||"")+" / "+esc(x.size||"")+" × "+x.quantity+'</span><button type="button" class="cart-less" data-cart-less="'+esc(x.key)+'" aria-label="Remove one '+esc(p.name)+'">−</button></div><b>'+money(Number(p.price)*x.quantity)+'</b></div>'}).join("")||'<p style="color:#777">Your bag is empty.</p>';
+ el.querySelectorAll("[data-cart-less]").forEach(b=>b.onclick=()=>{const item=state.cart.find(x=>x.key===b.dataset.cartLess);if(!item)return;if(item.quantity>1)item.quantity-=1;else state.cart=state.cart.filter(x=>x.key!==b.dataset.cartLess);save()});
+ $("#cartTotal").textContent=money(total);
 }
 function openCart(){$("#cart").classList.add("open")}function closeCart(){$("#cart").classList.remove("open")}
 $("#cartBtn").onclick=openCart;$("#closeCart").onclick=closeCart;
