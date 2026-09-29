@@ -7,10 +7,11 @@ import {fileURLToPath} from "node:url";
 import {createClient} from "@supabase/supabase-js";
 dotenv.config();
 const __dirname=path.dirname(fileURLToPath(import.meta.url)),app=express();
-app.set("trust proxy",1);
+app.set("trust proxy",1);app.disable("x-powered-by");
 const base=process.env.PUBLIC_BASE_URL||"";
 const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim()).filter(Boolean);
-app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);return cb(new Error("Origin not allowed"));},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
+app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);return cb(null,false);},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
+app.use((q,r,next)=>{r.setHeader("X-Content-Type-Options","nosniff");r.setHeader("X-Frame-Options","DENY");r.setHeader("Referrer-Policy","strict-origin-when-cross-origin");r.setHeader("Permissions-Policy","camera=(),microphone=(),geolocation=()");if(q.secure)r.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
 app.use(express.json({limit:"12mb"}));
 const blockedStatic=/^\/(?:server\.js|package(?:-lock)?\.json|\.env(?:\..*)?|supabase[^/]*\.sql)(?:$|\/)/i;
 app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
@@ -293,6 +294,7 @@ app.post("/api/paymob/webhook",async(q,r)=>{const o=q.body?.obj,h=String(q.query
 app.get("/api/payment-status",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const id=String(q.query.order_id||"").trim();if(!id)return r.status(400).json({error:"Missing order_id."});const o=await supabase.from("orders").select("id,payment_status,order_status,total_amount,created_at").eq("id",id).eq("brand_id",configuredBrandId()).eq("source","website").maybeSingle();if(o.error)return r.status(500).json({error:o.error.message});if(!o.data)return r.status(404).json({error:"Order not found."});r.json({order_id:o.data.id,payment_status:o.data.payment_status,order_status:o.data.order_status,total_amount:o.data.total_amount,created_at:o.data.created_at})});
 app.get("/payment-result",(_q,r)=>r.sendFile(path.join(__dirname,"payment-result.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"index.html")));
 const port=process.env.PORT||3000;
+app.use((err,q,r,next)=>{console.error("Unhandled request error:",err?.stack||err);if(r.headersSent)return next(err);r.status(500).json({error:"Internal server error."})});
 const server=app.listen(port,()=>console.log("Cutdown Store listening on "+port));
 function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
 process.on("SIGTERM",()=>shutdown("SIGTERM"));
