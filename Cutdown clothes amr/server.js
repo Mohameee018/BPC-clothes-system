@@ -81,24 +81,39 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
 });
 async function getAuthUser(req){const auth=String(req.headers.authorization||"");const token=auth.replace(/^Bearer\s+/i,"").trim();if(!token||!supabase)return null;const {data,error}=await supabase.auth.getUser(token);return error?null:data?.user||null}
 async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone").eq("id",userId).maybeSingle();return data||null}
+async function ensureCustomerForUser(user){
+  if(!supabase||!user?.id)return null;
+  const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
+  if(existing.error)throw existing.error;
+  if(existing.data)return existing.data;
+  const name=String(user.user_metadata?.name||user.raw_user_meta_data?.name||String(user.email||"").split("@")[0]||"Customer").trim();
+  const phone=String(user.user_metadata?.phone||user.raw_user_meta_data?.phone||"").trim()||null;
+  const created=await supabase.from("customers").insert({auth_user_id:user.id,name,email:user.email||null,phone}).select("id,name,email,phone,city,address").single();
+  if(created.error){
+    const retry=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
+    if(retry.data)return retry.data;
+    throw created.error;
+  }
+  return created.data;
+}
 const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:e.message||"Could not load customer profile."})}
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
  if(!Object.keys(patch).length)return r.status(400).json({error:"No profile changes."});
- const updated=await supabase.from("customers").update(patch).eq("auth_user_id",user.id).select("id,name,email,phone,city,address").maybeSingle();
+ const updated=await supabase.from("customers").update(patch).eq("id",customer.id).select("id,name,email,phone,city,address").maybeSingle();
  if(updated.error)return r.status(500).json({error:updated.error.message});if(!updated.data)return r.status(404).json({error:"Customer profile not found."});r.json({customer:updated.data});
 });
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const customer=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
- if(customer.error)return r.status(500).json({error:customer.error.message});if(!customer.data)return r.json({customer:null,orders:[]});
- const orders=await supabase.from("orders").select("*,order_items(*)").eq("customer_id",customer.data.id).order("created_at",{ascending:false}).limit(50);
- if(orders.error)return r.status(500).json({error:orders.error.message});r.json({customer:customer.data,orders:orders.data||[]});
+ let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:e.message||"Could not load customer profile."})}
+ const orders=await supabase.from("orders").select("*,order_items(*)").eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
+ if(orders.error)return r.status(500).json({error:orders.error.message});r.json({customer,orders:orders.data||[]});
 });
 app.get("/api/admin/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
