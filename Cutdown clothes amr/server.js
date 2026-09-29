@@ -11,7 +11,20 @@ app.use(cors());app.use(express.json({limit:"1mb"}));app.use(express.static(__di
 const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY):null;
 const base=process.env.PUBLIC_BASE_URL||"",paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
 app.get("/api/health",(_q,r)=>r.json({ok:true,supabase:!!supabase,paymentConfigured:!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET)}));
-app.get("/api/products",async(_q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {data,error}=await supabase.from("products").select("*").eq("active",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:error.message});r.json(data||[])});
+app.get("/api/products",async(_q,r)=>{
+ if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ const {data,error}=await supabase.from("products").select("*").eq("active",true).order("created_at",{ascending:false});
+ if(error)return r.status(500).json({error:error.message});
+ const products=data||[];
+ const ids=products.map(p=>p.id);
+ if(!ids.length)return r.json([]);
+ const {data:variants}=await supabase.from("product_variants").select("id,product_id,desktop_variant_id,sku,size,color,stock,active").in("product_id",ids).eq("active",true);
+ const {data:images}=await supabase.from("product_images").select("id,product_id,storage_path,public_url,alt_text,sort_order,color").in("product_id",ids).order("sort_order",{ascending:true});
+ const vm=new Map(),im=new Map();
+ (variants||[]).forEach(v=>{if(!vm.has(v.product_id))vm.set(v.product_id,[]);vm.get(v.product_id).push(v)});
+ (images||[]).forEach(v=>{if(!im.has(v.product_id))im.set(v.product_id,[]);im.get(v.product_id).push(v)});
+ r.json(products.map(p=>({...p,variants:vm.get(p.id)||[],images:im.get(p.id)||[]})));
+});
 app.get("/api/reviews",async(_q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {data,error}=await supabase.from("reviews").select("*").eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:error.message});r.json(data||[])});
 app.post("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:error.message});r.status(201).json(data)});
 app.post("/api/orders",async(q,r)=>{
