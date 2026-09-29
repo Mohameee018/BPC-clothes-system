@@ -320,3 +320,26 @@ with check (auth_user_id = auth.uid());
 -- 3. desktop_id is the stable bridge for existing Java Swing records.
 -- 4. Website IDs remain UUIDs; desktop IDs remain PRD-/ORD-/RET- style.
 -- 5. Service-role credentials stay server-side only.
+
+
+-- =========================================================
+-- WEBSITE ACCOUNT / ORDER LINKING (next integration step)
+-- =========================================================
+-- A customer account is represented by Supabase Auth + one profile row.
+-- Orders may be created by a signed-in customer or by guest checkout.
+create index if not exists ix_orders_customer_created
+    on orders(customer_id, created_at desc)
+    where customer_id is not null;
+
+-- A product is considered sold out from inventory, while active=false is
+-- reserved for deliberately hidden products. This keeps "SOLD OUT" visible
+-- on the storefront instead of silently hiding an exhausted product.
+create or replace function product_is_sold_out(p_product_id uuid)
+returns boolean
+language sql
+stable
+as $$
+    select coalesce((
+        select stock <= 0 from products where id = p_product_id
+    ), true);
+$$;
