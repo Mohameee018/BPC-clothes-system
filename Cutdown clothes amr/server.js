@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import dotenv from "dotenv";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -12,6 +13,7 @@ const base=process.env.PUBLIC_BASE_URL||"";
 const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim()).filter(Boolean);
 app.use(cors({origin:(origin,cb)=>{if(!origin||!allowedOrigins.length||allowedOrigins.includes(origin))return cb(null,true);return cb(null,false);},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
 app.use((q,r,next)=>{r.setHeader("X-Content-Type-Options","nosniff");r.setHeader("X-Frame-Options","DENY");r.setHeader("Referrer-Policy","strict-origin-when-cross-origin");r.setHeader("Permissions-Policy","camera=(),microphone=(),geolocation=()");if(q.secure)r.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
+app.use(compression({threshold:"1kb"}));
 app.use(express.json({limit:"12mb"}));
 const blockedStatic=/^\/(?:server\.js|package(?:-lock)?\.json|\.env(?:\..*)?|supabase[^/]*\.sql)(?:$|\/)/i;
 app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
