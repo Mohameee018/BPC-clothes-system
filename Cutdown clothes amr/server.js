@@ -58,18 +58,22 @@ app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
 });
 app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
- const {order_id,items}=q.body||{};
- if(!order_id||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing return data."});
- const order=await supabase.from("orders").select("id,customer_id,source").eq("id",order_id).eq("source","website").maybeSingle();
- if(order.error)return r.status(500).json({error:order.error.message}); if(!order.data)return r.status(404).json({error:"Website order not found."});
- for(const item of items){
-   const qty=Math.max(0,Number(item.quantity||0)); if(!qty)continue;
-   const ins=await supabase.from("returns").upsert({desktop_id:String(item.return_id||"")+"::"+String(order_id),order_id,customer_id:order.data.customer_id||null,return_type:"whole_order",reason:String(item.reason||""),disposition:String(item.disposition||"Return to Stock"),refund_amount:Number(item.amount||0),loss:Number(item.loss||0),processed_at:new Date().toISOString()},{onConflict:"desktop_id"});
-   if(ins.error)return r.status(500).json({error:ins.error.message});
+ const {order_id,reason,disposition,amount,loss}=q.body||{};
+ if(!order_id)return r.status(400).json({error:"Missing order_id."});
+ const result=await supabase.rpc("process_whole_order_return",{
+   p_order_id:order_id,
+   p_reason:String(reason||"Customer Return"),
+   p_disposition:String(disposition||"Return to Stock"),
+   p_refund_amount:Number(amount||0),
+   p_loss:Number(loss||0)
+ });
+ if(result.error){
+   const msg=String(result.error.message||"");
+   if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
+   if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."});
+   return r.status(500).json({error:msg});
  }
- const u=await supabase.from("orders").update({delivery_status:"Returned",order_status:"Not Prepared"}).eq("id",order_id);
- if(u.error)return r.status(500).json({error:u.error.message});
- r.json({ok:true});
+ r.json({ok:true,processed:result.data===true});
 });
 app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
