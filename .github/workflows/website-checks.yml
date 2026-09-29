@@ -15,7 +15,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --check server.js
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check server.js
       - run: node --check script.js
