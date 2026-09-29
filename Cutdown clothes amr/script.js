@@ -57,7 +57,11 @@ function addSelectedProduct(){
  save();$("#productModal").classList.remove("open");openCart();
 }
 function renderCart(){
- const el=$("#cartItems");$("#cartCount").textContent=state.cart.reduce((n,x)=>n+x.quantity,0);let total=0;
+ const el=$("#cartItems");
+ const valid=state.cart.filter(x=>state.products.some(y=>y.id===x.product_id)&&Number(x.quantity)>0);
+ if(valid.length!==state.cart.length){state.cart=valid;localStorage.setItem("cutdown_cart",JSON.stringify(state.cart))}
+ $("#cartCount").textContent=state.cart.reduce((n,x)=>n+Math.max(0,Number(x.quantity)||0),0);
+ let total=0;
  el.innerHTML=state.cart.map(x=>{const p=state.products.find(y=>y.id===x.product_id);if(!p)return "";total+=Number(p.price)*x.quantity;return '<div class="cart-item"><div class="cart-item-main"><span>'+esc(p.name)+' · '+esc(x.color||"")+" / "+esc(x.size||"")+" × "+x.quantity+'</span><button type="button" class="cart-less" data-cart-less="'+esc(x.key)+'" aria-label="Remove one '+esc(p.name)+'">−</button></div><b>'+money(Number(p.price)*x.quantity)+'</b></div>'}).join("")||'<p style="color:#777">Your bag is empty.</p>';
  el.querySelectorAll("[data-cart-less]").forEach(b=>b.onclick=()=>{const item=state.cart.find(x=>x.key===b.dataset.cartLess);if(!item)return;if(item.quantity>1)item.quantity-=1;else state.cart=state.cart.filter(x=>x.key!==b.dataset.cartLess);save()});
  $("#cartTotal").textContent=money(total);
@@ -67,7 +71,7 @@ $("#cartBtn").onclick=openCart;$("#closeCart").onclick=closeCart;
 $("#closeProduct").onclick=()=>$("#productModal").classList.remove("open");
 $("#productModal").addEventListener("click",e=>{if(e.target.id==="productModal")e.currentTarget.classList.remove("open")});
 $("#qtyMinus").onclick=()=>{if(productView){productView.quantity=Math.max(1,productView.quantity-1);renderProductView()}};
-$("#qtyPlus").onclick=()=>{if(productView){const v=findVariant(productView.p,productView.color,productView.size);productView.quantity=Math.min(Number(v?.stock||1),productView.quantity+1);renderProductView()}};
+$("#qtyPlus").onclick=()=>{if(!productView)return;const v=findVariant(productView.p,productView.color,productView.size),stock=Number(v?.stock||0);if(!v||stock<=0)return;if(productView.quantity<stock){productView.quantity+=1;renderProductView()}else{$("#productMsg").textContent="Maximum available quantity: "+stock}};
 $("#addProductToCart").onclick=addSelectedProduct;$("#checkoutBtn").onclick=()=>{if(!state.cart.length)return;closeCart();$("#checkout").classList.add("open")};$("#closeCheckout").onclick=()=>$("#checkout").classList.remove("open");
 async function loadReviews(){try{const r=await fetchWithTimeout("/api/reviews");if(!r.ok)throw 0;const data=await r.json();$("#reviewList").innerHTML=data.length?data.map(x=>'<article class="review"><div class="stars">'+("★".repeat(x.rating))+'</div><h3>'+String(x.name).replace(/[<>]/g,"")+'</h3><p>'+String(x.body).replace(/[<>]/g,"")+'</p></article>').join(""):'<p>No reviews yet. Be the first.</p>'}catch{$("#reviewList").innerHTML='<p>Reviews will appear here once Supabase is connected.</p>'}}
 document.querySelectorAll('input[name="payment_method"]').forEach(r=>r.addEventListener("change",syncPaymentUI));
