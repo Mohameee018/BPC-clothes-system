@@ -73,6 +73,15 @@ app.get("/api/products",async(_q,r)=>{
 });
 app.get("/api/reviews",async(_q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {data,error}=await supabase.from("reviews").select("*").eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:error.message});r.json(data||[])});
 app.post("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:error.message});r.status(201).json(data)});
+async function findOrCreateCustomer(customer){
+ if(!supabase||!customer?.phone)return null;
+ const phone=String(customer.phone).trim();
+ const found=await supabase.from("customers").select("id").eq("phone",phone).maybeSingle();
+ if(found.data?.id)return found.data.id;
+ const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};
+ const created=await supabase.from("customers").insert(payload).select("id").single();
+ return created.data?.id||null;
+}
 app.post("/api/orders",async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {customer,items,payment_method}=q.body||{};if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
@@ -86,8 +95,9 @@ app.post("/api/orders",async(q,r)=>{
    total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,size:v?.size||item.size||null,color:v?.color||item.color||null})
  }
  const variantReservation=clean.filter(i=>i.variant_id).map(i=>({variant_id:i.variant_id,quantity:i.quantity}));
+ const customerId=await findOrCreateCustomer(customer);
  if(variantReservation.length){const reserve=await supabase.rpc("reserve_variant_stock",{p_items:variantReservation});if(reserve.error)return r.status(409).json({error:"One or more selected sizes are no longer available."});}
- const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,stock_reserved:variantReservation.length>0}).select().single();if(oe)return r.status(500).json({error:oe.message});
+ const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,source:"website",stock_reserved:variantReservation.length>0}).select().single();if(oe)return r.status(500).json({error:oe.message});
  const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id})));if(ie){if(variantReservation.length)await supabase.rpc("release_variant_stock",{p_items:variantReservation});await supabase.from("orders").delete().eq("id",order.id);return r.status(500).json({error:ie.message})}
  if(payment_method==="cod"){await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id);return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."})}
  if(!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET&&base))return r.status(503).json({error:"Online payment is not configured yet. Add Supabase + Paymob variables in Railway."});
