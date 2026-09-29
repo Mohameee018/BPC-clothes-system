@@ -271,6 +271,7 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
  const {customer,items,payment_method}=q.body||{}; const brandId=configuredBrandId();
   if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});
   if(items.length>50)return r.status(400).json({error:"Too many order items."});
+  if(items.some(i=>!i||!i.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order item."});
   const fields=[["name",customer.name,120],["phone",customer.phone,40],["address",customer.address,500],["city",customer.city,100],["email",customer.email,254],["notes",customer.notes,1000]];
   if(fields.some(([_,v,max])=>v!==undefined&&String(v).length>max))return r.status(400).json({error:"One or more order fields are too long."});
   if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
