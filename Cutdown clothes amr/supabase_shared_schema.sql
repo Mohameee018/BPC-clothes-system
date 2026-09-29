@@ -419,7 +419,7 @@ declare
     order_row record;
     item_row record;
 begin
-    select id, customer_id, source
+    select id, customer_id, source, order_status, payment_status, stock_reserved
       into order_row
       from orders
      where id = p_order_id
@@ -428,6 +428,15 @@ begin
 
     if not found then
         raise exception 'WEBSITE_ORDER_NOT_FOUND';
+    end if;
+
+    if not (coalesce(order_row.order_status, '') = 'confirmed'
+            or coalesce(order_row.payment_status, '') = 'paid') then
+        raise exception 'ORDER_NOT_CONFIRMED';
+    end if;
+
+    if not coalesce(order_row.stock_reserved, false) then
+        raise exception 'ORDER_STOCK_NOT_RESERVED';
     end if;
 
     -- One canonical return transaction per website order.
@@ -482,6 +491,7 @@ begin
     update orders
        set delivery_status = 'Returned',
            order_status = 'Not Prepared',
+           stock_reserved = false,
            updated_at = now()
      where id = p_order_id;
 
