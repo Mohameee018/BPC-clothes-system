@@ -58,12 +58,13 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
     if(old.data?.length)await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));
     await supabase.from("product_images").delete().eq("brand_id",q.brandId).eq("product_id",productId);
     const imageRows=[];
-    for(const img of images.slice(0,30)){
+    for(const img of images){
       if(!img.data_base64)continue;
-      const ext=extFromMime(img.mime_type),color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
+      const bytes=Buffer.from(String(img.data_base64),"base64");if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
+      const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Unsupported product image type."});
+      const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
       const path="desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
-      const bytes=Buffer.from(String(img.data_base64),"base64");
-      const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:img.mime_type||"image/"+ext,upsert:true});
+      const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:true});
       if(upImg.error)return r.status(500).json({error:"Internal server error."});
       const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
       imageRows.push({brand_id:q.brandId,product_id:productId,storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
