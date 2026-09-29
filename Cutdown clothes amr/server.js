@@ -102,6 +102,10 @@ async function ensureCustomerForUser(user){
   const existing=await supabase.from("customers").select("id,name,email,phone,city,address").eq("brand_id",brandId).eq("auth_user_id",user.id).maybeSingle();
   if(existing.error)throw existing.error;
   if(existing.data)return existing.data;
+  const profileBrand=String(profile?.brand_id||"").trim();
+  if(!profileBrand)return null;
+  const brand=await supabase.from("brands").select("id,active").eq("id",profileBrand).maybeSingle();
+  if(brand.error||!brand.data?.active)return null;
   const name=String(user.user_metadata?.name||user.raw_user_meta_data?.name||String(user.email||"").split("@")[0]||"Customer").trim();
   const phone=String(user.user_metadata?.phone||user.raw_user_meta_data?.phone||"").trim()||null;
   const created=await supabase.from("customers").insert({brand_id:brandId,auth_user_id:user.id,name,email:user.email||null,phone}).select("id,name,email,phone,city,address").single();
@@ -114,6 +118,18 @@ async function ensureCustomerForUser(user){
 }
 const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
+app.post("/api/auth/signup",async(q,r)=>{
+ if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
+ const email=String(q.body?.email||"").trim(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim();
+ if(!email||password.length<6)return r.status(400).json({error:"Email and password are required; password must be at least 6 characters."});
+ const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone}}});
+ if(signed.error)return r.status(400).json({error:signed.error.message});
+ const user=signed.data.user;
+ if(!user)return r.status(400).json({error:"Account could not be created."});
+ const profile=await supabase.from("profiles").update({brand_id:configuredBrandId(),role:"customer",name,phone}).eq("id",user.id);
+ if(profile.error)return r.status(500).json({error:"Account created but brand assignment failed. Please contact support."});
+ r.status(201).json({user:{id:user.id,email:user.email||null},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
+});
 app.post("/api/desktop/auth/login",async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim(),password=String(q.body?.password||"");
@@ -164,6 +180,7 @@ app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)ret
 app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:profile.brand_id})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ const accountProfile=await getAuthProfile(user.id); if(!accountProfile?.brand_id||String(accountProfile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:e.message||"Could not load customer profile."})}
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
@@ -174,7 +191,8 @@ app.post("/api/account/profile",async(q,r)=>{
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:e.message||"Could not load customer profile."})}
- const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String((await getAuthProfile(user.id))?.brand_id||configuredBrandId())).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
+ const profile=await getAuthProfile(user.id); if(!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
+ const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String(profile.brand_id)).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
  if(orders.error)return r.status(500).json({error:orders.error.message});r.json({customer,orders:orders.data||[]});
 });
 app.get("/api/admin/orders",async(q,r)=>{
