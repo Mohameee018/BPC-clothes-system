@@ -56,6 +56,21 @@ app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
  if(o.error)return r.status(500).json({error:o.error.message});
  r.json((o.data||[]).map(x=>({...x,customer_name:x.customer_name||"",customer_phone:x.customer_phone||"",order_items:(x.order_items||[]).map(i=>({...i,product_name:i.product_name||"",sku:i.sku||"",category:i.category||"",size:i.size||"",color:i.color||"",cost_price:i.cost_price||0}))})));
 });
+app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
+ if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ const {order_id,items}=q.body||{};
+ if(!order_id||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing return data."});
+ const order=await supabase.from("orders").select("id,customer_id,source").eq("id",order_id).eq("source","website").maybeSingle();
+ if(order.error)return r.status(500).json({error:order.error.message}); if(!order.data)return r.status(404).json({error:"Website order not found."});
+ for(const item of items){
+   const qty=Math.max(0,Number(item.quantity||0)); if(!qty)continue;
+   const ins=await supabase.from("returns").upsert({desktop_id:String(item.return_id||"")+"::"+String(order_id),order_id,customer_id:order.data.customer_id||null,return_type:"whole_order",reason:String(item.reason||""),disposition:String(item.disposition||"Return to Stock"),refund_amount:Number(item.amount||0),loss:Number(item.loss||0),processed_at:new Date().toISOString()},{onConflict:"desktop_id"});
+   if(ins.error)return r.status(500).json({error:ins.error.message});
+ }
+ const u=await supabase.from("orders").update({delivery_status:"Returned",order_status:"Not Prepared"}).eq("id",order_id);
+ if(u.error)return r.status(500).json({error:u.error.message});
+ r.json({ok:true});
+});
 app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {order_id,order_status,delivery_status}=q.body||{};
