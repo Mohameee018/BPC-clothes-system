@@ -85,6 +85,12 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id").maybeSingle();
  if(u.error)return r.status(500).json({error:u.error.message}); if(!u.data)return r.status(404).json({error:"Website order not found."}); r.json({ok:true});
 });
+
+async function getAuthUser(req){const auth=String(req.headers.authorization||"");const token=auth.replace(/^Bearer\s+/i,"").trim();if(!token||!supabase)return null;const {data,error}=await supabase.auth.getUser(token);return error?null:data?.user||null}
+async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone").eq("id",userId).maybeSingle();return data||null}
+app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL||!process.env.SUPABASE_PUBLISHABLE_KEY)return r.status(503).json({error:"Supabase public auth is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:process.env.SUPABASE_PUBLISHABLE_KEY})});
+app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
+app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true})});
 app.get("/api/health",async(_q,r)=>{const paymentConfigured=!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET);if(!supabase)return r.status(503).json({ok:false,supabase:false,paymentConfigured});const probe=await supabase.from("products").select("id").limit(1);if(probe.error)return r.status(503).json({ok:false,supabase:false,paymentConfigured});r.json({ok:true,supabase:true,paymentConfigured});});
 app.get("/api/products",async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
