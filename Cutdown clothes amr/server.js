@@ -81,7 +81,8 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
 });
 async function getAuthUser(req){const auth=String(req.headers.authorization||"");const token=auth.replace(/^Bearer\s+/i,"").trim();if(!token||!supabase)return null;const {data,error}=await supabase.auth.getUser(token);return error?null:data?.user||null}
 async function getAuthProfile(userId){if(!supabase||!userId)return null;const {data}=await supabase.from("profiles").select("id,role,name,phone").eq("id",userId).maybeSingle();return data||null}
-app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL||!process.env.SUPABASE_PUBLISHABLE_KEY)return r.status(503).json({error:"Supabase public auth is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:process.env.SUPABASE_PUBLISHABLE_KEY})});
+const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
+app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true})});
 app.post("/api/account/profile",async(q,r)=>{
