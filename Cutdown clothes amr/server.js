@@ -192,7 +192,7 @@ app.post("/api/admin/orders/status",async(q,r)=>{
  if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
  if(delivery_status&&!deliveryStatuses.includes(String(delivery_status)))return r.status(400).json({error:"Invalid delivery status."});
  const patch={}; if(order_status)patch.order_status=String(order_status);if(delivery_status)patch.delivery_status=String(delivery_status);
- const updated=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
+ const updated=await supabase.from("orders").update(patch).eq("id",order_id).eq("brand_id",configuredBrandId()).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
  if(updated.error)return r.status(500).json({error:updated.error.message});if(!updated.data)return r.status(404).json({error:"Website order not found."});r.json({ok:true,order:updated.data});
 });
 
