@@ -183,7 +183,25 @@ app.get("/api/desktop/update",async(q,r)=>{
  const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
  const brand=await supabase.from("brands").select("id,name,desktop_update_channel,active").eq("id",profile.brand_id).maybeSingle();
  if(brand.error||!brand.data?.active)return r.status(403).json({error:"Brand is inactive."});
- r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||""),sha256:String(process.env.CUTDOWN_DESKTOP_SHA256||"").toLowerCase(),mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
+ const channel=String(brand.data.desktop_update_channel||"stable").trim()||"stable";
+ const manifest=await supabase.from("desktop_update_manifests")
+   .select("version,download_url,sha256,mandatory,updated_at")
+   .eq("brand_id",profile.brand_id)
+   .eq("channel",channel)
+   .maybeSingle();
+ if(manifest.error)return r.status(500).json({error:"Could not load desktop update manifest."});
+ if(manifest.data){
+   const url=String(manifest.data.download_url||"").trim();
+   const sha=String(manifest.data.sha256||"").trim().toLowerCase();
+   if(!/^https:\/\//i.test(url)||!/^[a-f0-9]{64}$/.test(sha))return r.status(500).json({error:"Desktop update manifest is invalid."});
+   return r.json({brand:brand.data,version:String(manifest.data.version),download_url:url,sha256:sha,mandatory:manifest.data.mandatory===true,updated_at:manifest.data.updated_at});
+ }
+ const url=String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||"").trim();
+ const sha=String(process.env.CUTDOWN_DESKTOP_SHA256||"").trim().toLowerCase();
+ if(url&&/^https:\/\//i.test(url)&&/^[a-f0-9]{64}$/.test(sha)){
+   return r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:url,sha256:sha,mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
+ }
+ return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:configuredBrandId()})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
