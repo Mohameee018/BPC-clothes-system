@@ -71,6 +71,8 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
    const msg=String(result.error.message||"");
    if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
    if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."});
+   if(msg.includes("ORDER_NOT_CONFIRMED"))return r.status(409).json({error:"Order is not confirmed for return."});
+   if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
    return r.status(500).json({error:msg});
  }
  r.json({ok:true,processed:result.data===true});
