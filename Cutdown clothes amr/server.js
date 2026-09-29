@@ -52,7 +52,7 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
 });
 app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
-  const o=await supabase.from("orders").select("*,order_items(*)").order("created_at",{ascending:false}).limit(100);
+  const o=await supabase.from("orders").select("*,order_items(*)").eq("source","website").order("created_at",{ascending:false}).limit(100);
   if(o.error)return r.status(500).json({error:o.error.message});
   r.json(o.data||[]);
 });
