@@ -146,8 +146,29 @@ app.get("/api/products",async(_q,r)=>{
 app.get("/api/reviews",async(_q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {data,error}=await supabase.from("reviews").select("*").eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:error.message});r.json(data||[])});
 app.post("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:error.message});r.status(201).json(data)});
 async function findOrCreateCustomer(customer){
- if(!supabase||!customer?.phone)return null;const phone=String(customer.phone).trim();const found=await supabase.from("customers").select("id").eq("phone",phone).maybeSingle();if(found.data?.id)return found.data.id;
- const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};const created=await supabase.from("customers").insert(payload).select("id").single();return created.data?.id||null;
+ if(!supabase||!customer?.phone)return null;
+ const phone=String(customer.phone).trim();if(!phone)return null;
+ const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};
+ const found=await supabase.from("customers").select("id").eq("phone",phone).maybeSingle();
+ if(found.error)throw found.error;
+ if(found.data?.id){
+   const updated=await supabase.from("customers").update(payload).eq("id",found.data.id).select("id").maybeSingle();
+   if(updated.error)throw updated.error;
+   return found.data.id;
+ }
+ const created=await supabase.from("customers").insert(payload).select("id").single();
+ if(!created.error&&created.data?.id)return created.data.id;
+ if(created.error){
+   const retry=await supabase.from("customers").select("id").eq("phone",phone).maybeSingle();
+   if(retry.error)throw retry.error;
+   if(retry.data?.id){
+     const updated=await supabase.from("customers").update(payload).eq("id",retry.data.id).select("id").maybeSingle();
+     if(updated.error)throw updated.error;
+     return retry.data.id;
+   }
+   throw created.error;
+ }
+ return null;
 }
 app.post("/api/orders",async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
