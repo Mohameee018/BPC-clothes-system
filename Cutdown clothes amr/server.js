@@ -10,7 +10,7 @@ dotenv.config();
 const __dirname=path.dirname(fileURLToPath(import.meta.url)),app=express();
 app.set("trust proxy",1);app.disable("x-powered-by");
 const base=process.env.PUBLIC_BASE_URL||"";
-const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim()).filter(Boolean);
+const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim().replace(/\/$/,"")).filter(Boolean);
 app.use(cors({origin:(origin,cb)=>{if(!origin||allowedOrigins.includes(origin))return cb(null,true);return cb(null,false);},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
 app.use((q,r,next)=>{r.setHeader("X-Content-Type-Options","nosniff");r.setHeader("X-Frame-Options","DENY");r.setHeader("Referrer-Policy","strict-origin-when-cross-origin");r.setHeader("Permissions-Policy","camera=(),microphone=(),geolocation=()");if(q.secure)r.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
 app.use(compression({threshold:"1kb"}));
