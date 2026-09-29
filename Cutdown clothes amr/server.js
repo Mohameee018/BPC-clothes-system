@@ -30,8 +30,15 @@ app.post("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({err
 app.post("/api/orders",async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {customer,items,payment_method}=q.body||{};if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
- const {data:products,error:pe}=await supabase.from("products").select("id,name,price,stock,active").in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:pe.message});const map=new Map((products||[]).map(p=>[p.id,p]));let total=0;const clean=[];
- for(const item of items){const p=map.get(item.product_id),n=Math.max(1,Math.floor(Number(item.quantity)));if(!p||!p.active||n>p.stock)return r.status(409).json({error:"A product is unavailable."});total+=Number(p.price)*n;clean.push({product_id:p.id,product_name:p.name,quantity:n,unit_price:p.price,size:item.size||null,color:item.color||null})}
+ const {data:products,error:pe}=await supabase.from("products").select("id,name,price,stock,active").in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:pe.message});
+ const variantIds=items.map(i=>i.variant_id).filter(Boolean);let variants=[];
+ if(variantIds.length){const vr=await supabase.from("product_variants").select("id,product_id,size,color,stock,active").in("id",variantIds);if(vr.error)return r.status(500).json({error:vr.error.message});variants=vr.data||[]}
+ const map=new Map((products||[]).map(p=>[p.id,p])),vmap=new Map(variants.map(v=>[v.id,v]));let total=0;const clean=[];
+ for(const item of items){
+   const p=map.get(item.product_id),n=Math.max(1,Math.floor(Number(item.quantity))),v=item.variant_id?vmap.get(item.variant_id):null;
+   if(!p||!p.active||(!v&&n>p.stock)|| (v&&(!v.active||v.product_id!==p.id||n>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});
+   total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,size:v?.size||item.size||null,color:v?.color||item.color||null})
+ }
  const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total}).select().single();if(oe)return r.status(500).json({error:oe.message});
  const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id})));if(ie){await supabase.from("orders").delete().eq("id",order.id);return r.status(500).json({error:ie.message})}
  if(payment_method==="cod"){await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id);return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."})}
