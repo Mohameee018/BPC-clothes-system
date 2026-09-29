@@ -29,9 +29,9 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
   if(up.error)return r.status(500).json({error:up.error.message});
   const productId=up.data.id;
   const variants=Array.isArray(p.variants)?p.variants:[];
-  if(variants.length){const rows=variants.map(v=>({desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"desktop_variant_id"});if(vu.error)return r.status(500).json({error:vu.error.message});}
+  if(variants.length){const rows=variants.map(v=>({desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"desktop_variant_id"});if(vu.error)return r.status(500).json({error:vu.error.message});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:stale.error.message});}else{const clear=await supabase.from("product_variants").delete().eq("product_id",productId);if(clear.error)return r.status(500).json({error:clear.error.message});}
   const images=Array.isArray(p.images)?p.images.slice(0,50):[];
-  if(images.length){
+  if(images.length || p.images){
     const old=await supabase.from("product_images").select("storage_path").eq("product_id",productId);
     if(old.data?.length)await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));
     await supabase.from("product_images").delete().eq("product_id",productId);
