@@ -91,6 +91,21 @@ async function getAuthProfile(userId){if(!supabase||!userId)return null;const {d
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL||!process.env.SUPABASE_PUBLISHABLE_KEY)return r.status(503).json({error:"Supabase public auth is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:process.env.SUPABASE_PUBLISHABLE_KEY})});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 app.get("/api/admin/ping",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});const profile=await getAuthProfile(user.id);if(profile?.role!=="admin")return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true})});
+app.post("/api/account/profile",async(q,r)=>{
+ const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
+ const {name,phone,city,address}=q.body||{};
+ const patch={};
+ if(name!==undefined)patch.name=String(name).trim();
+ if(phone!==undefined)patch.phone=String(phone).trim();
+ if(city!==undefined)patch.city=String(city).trim();
+ if(address!==undefined)patch.address=String(address).trim();
+ if(!Object.keys(patch).length)return r.status(400).json({error:"No profile changes."});
+ const updated=await supabase.from("customers").update(patch).eq("auth_user_id",user.id).select("id,name,email,phone,city,address").maybeSingle();
+ if(updated.error)return r.status(500).json({error:updated.error.message});
+ if(!updated.data)return r.status(404).json({error:"Customer profile not found."});
+ r.json({customer:updated.data});
+});
+
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  const customer=await supabase.from("customers").select("id,name,email,phone,city,address").eq("auth_user_id",user.id).maybeSingle();
