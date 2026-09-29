@@ -54,7 +54,7 @@ app.post("/api/desktop/products/sync",requireDesktopSync,async(q,r)=>{
 });
 app.get("/api/desktop/orders",requireDesktopSync,async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
- const o=await supabase.from("orders").select("*,order_items(*)").eq("source","website").order("created_at",{ascending:false}).limit(100);
+ const o=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",q.brandId).eq("source","website").order("created_at",{ascending:false}).limit(100);
  if(o.error)return r.status(500).json({error:o.error.message});
  r.json((o.data||[]).map(x=>({...x,customer_name:x.customer_name||"",customer_phone:x.customer_phone||"",order_items:(x.order_items||[]).map(i=>({...i,product_name:i.product_name||"",sku:i.sku||"",category:i.category||"",size:i.size||"",color:i.color||"",cost_price:i.cost_price||0}))})));
 });
@@ -62,6 +62,8 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {order_id,reason,disposition,amount,loss}=q.body||{};
  if(!order_id)return r.status(400).json({error:"Missing order_id."});
+ const owned=await supabase.from("orders").select("id").eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").maybeSingle();
+ if(owned.error)return r.status(500).json({error:owned.error.message}); if(!owned.data)return r.status(404).json({error:"Website order not found."});
  const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:String(disposition||"Return to Stock"),p_refund_amount:Number(amount||0),p_loss:Number(loss||0)});
  if(result.error){
    const msg=String(result.error.message||"");
@@ -82,7 +84,7 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
  if(delivery_status&&!deliveryStatuses.includes(String(delivery_status)))return r.status(400).json({error:"Invalid delivery status."});
  const patch={}; if(order_status)patch.order_status=String(order_status); if(delivery_status)patch.delivery_status=String(delivery_status);
- const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("source","website").select("id").maybeSingle();
+ const u=await supabase.from("orders").update(patch).eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").select("id").maybeSingle();
  if(u.error)return r.status(500).json({error:u.error.message}); if(!u.data)return r.status(404).json({error:"Website order not found."}); r.json({ok:true});
 });
 async function getAuthUser(req){const auth=String(req.headers.authorization||"");const token=auth.replace(/^Bearer\s+/i,"").trim();if(!token||!supabase)return null;const {data,error}=await supabase.auth.getUser(token);return error?null:data?.user||null}
