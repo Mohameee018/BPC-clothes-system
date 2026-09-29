@@ -187,7 +187,10 @@ app.post("/api/orders",async(q,r)=>{
  for(const item of items){const p=map.get(item.product_id),n=Math.max(1,Math.floor(Number(item.quantity))),v=item.variant_id?vmap.get(item.variant_id):null;if(!p||!p.active||(!v&&n>p.stock)|| (v&&(!v.active||v.product_id!==p.id||n>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,size:v?.size||item.size||null,color:v?.color||item.color||null})}
  const variantReservation=clean.filter(i=>i.variant_id).map(i=>({variant_id:i.variant_id,quantity:i.quantity}));const authUser=await getAuthUser(q);let customerId=null;
  if(authUser){const linked=await supabase.from("customers").select("id").eq("auth_user_id",authUser.id).maybeSingle();if(linked.error)return r.status(500).json({error:linked.error.message});if(linked.data?.id)customerId=linked.data.id}
- if(!customerId)customerId=await findOrCreateCustomer(customer);
+ if(!customerId){
+   try{customerId=await findOrCreateCustomer(customer);}
+   catch(e){return r.status(500).json({error:"Could not link customer record."});}
+ }
  if(authUser&&customerId){const link=await supabase.from("customers").update({auth_user_id:authUser.id,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),name:customer.name.trim()}).eq("id",customerId);if(link.error)return r.status(500).json({error:link.error.message})}
  if(variantReservation.length){const reserve=await supabase.rpc("reserve_variant_stock",{p_items:variantReservation});if(reserve.error)return r.status(409).json({error:"One or more selected sizes are no longer available."})}
  const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,source:"website",stock_reserved:variantReservation.length>0}).select().single();if(oe)return r.status(500).json({error:oe.message});
