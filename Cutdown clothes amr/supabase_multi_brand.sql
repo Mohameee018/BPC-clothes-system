@@ -134,3 +134,16 @@ as $$
 $$;
 revoke all on function public.is_brand_admin() from public, anon;
 grant execute on function public.is_brand_admin() to authenticated;
+
+-- The application server is the only data API for tenant data.
+-- Public browser clients use Supabase Auth only; they do not query tenant tables directly.
+revoke all on table public.products from anon, authenticated;
+revoke all on table public.product_variants from anon, authenticated;
+revoke all on table public.product_images from anon, authenticated;
+revoke all on table public.warehouses from anon, authenticated;
+revoke all on table public.inventory from anon, authenticated;
+revoke all on table public.customers from anon, authenticated;
+revoke all on table public.orders from anon, authenticated;
+revoke all on table public.order_items from anon, authenticated;
+revoke all on table public.returns from anon, authenticated;
+revoke all on table public.reviews from anon, authenticated;
