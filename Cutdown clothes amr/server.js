@@ -89,7 +89,7 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
   if(o.error)return r.status(500).json({error:o.error.message});
   r.json(o.data||[]);
 });
-app.get("/api/health",(_q,r)=>r.json({ok:true,supabase:!!supabase,paymentConfigured:!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET)}));
+app.get("/api/health",async(_q,r)=>{const paymentConfigured=!!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET);if(!supabase)return r.status(503).json({ok:false,supabase:false,paymentConfigured});const probe=await supabase.from("products").select("id").limit(1);if(probe.error)return r.status(503).json({ok:false,supabase:false,paymentConfigured});r.json({ok:true,supabase:true,paymentConfigured});});
 app.get("/api/products",async(_q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
  const {data,error}=await supabase.from("products").select("*").eq("active",true).order("created_at",{ascending:false});
