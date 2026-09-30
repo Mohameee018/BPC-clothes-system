@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BPC Clothes System — الدفع</title><link rel="stylesheet" href="style.css">
+<style>
+body{margin:0;background:#061b10;color:#f7fbf8;font-family:"Readex Pro",Arial,sans-serif;min-height:100vh}
+.wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 25% 20%,rgba(57,201,121,.18),transparent 35%),radial-gradient(circle at 80% 80%,rgba(142,233,177,.1),transparent 30%)}
+.card{width:min(620px,100%);padding:34px;border:1px solid rgba(190,255,214,.16);border-radius:28px;background:rgba(8,43,25,.72);backdrop-filter:blur(24px);box-shadow:0 28px 90px rgba(0,0,0,.25)}
+.eyebrow{color:#8ee9b1;letter-spacing:.15em;font-size:11px}.price{font-size:42px;font-weight:700;margin:18px 0 4px}.muted{color:rgba(247,251,248,.64);line-height:1.8}.status{margin:20px 0;padding:14px;border-radius:14px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15);color:#f6d98a}
+.actions{display:grid;gap:10px;margin-top:20px}button,a.btn{border:0;border-radius:14px;padding:14px 16px;text-align:center;font-weight:700;cursor:pointer;text-decoration:none;font-size:14px}
+.primary{background:#39c979;color:#062617}.secondary{background:rgba(255,255,255,.08);color:#f7fbf8;border:1px solid rgba(255,255,255,.1)!important}
+.details{display:none;margin-top:18px;padding:18px;border-radius:16px;background:rgba(255,255,255,.045);border:1px solid rgba(142,233,177,.14)}
+.row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px}.row:last-child{border-bottom:0}.row b{color:#8ee9b1}
+input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);background:#f7fbf8;color:#0b1710;padding:12px;border-radius:12px;margin-top:10px}
+.note{font-size:12px;color:rgba(247,251,248,.55);line-height:1.7;margin-top:14px}
+</style></head>
+<body><main class="wrap"><section class="card">
+<div class="eyebrow">BPC CLOTHES SYSTEM · PAYMENT</div>
+<h1 id="title">أكمل دفع الاشتراك</h1><p id="copy" class="muted">جارٍ تحميل بيانات الباقة…</p>
+<div id="price" class="price">—</div><div id="status" class="status">جاري التحقق من الاشتراك…</div>
+<div id="details" class="details"></div><div id="actions" class="actions"></div><div id="msg" class="note"></div>
+</section></main>
+<script>
+const token=sessionStorage.getItem("bpc_signup_token");const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const statusEl=document.querySelector("#status"),details=document.querySelector("#details"),actions=document.querySelector("#actions"),price=document.querySelector("#price"),copy=document.querySelector("#copy"),msg=document.querySelector("#msg");
+function showManual(s){
+ const method=s.payment_method==="instapay"?"InstaPay":"Vodafone Cash", isI=s.payment_method==="instapay";
+ const p=s.plan||{}; price.textContent=Number(p.price||0).toLocaleString("ar-EG")+" جنيه";
+ copy.innerHTML="الباقة: <b>"+esc(p.name||"")+"</b><br>المبلغ المطلوب: <b>"+Number(p.price||0).toLocaleString("ar-EG")+" جنيه مصري</b>";
+ statusEl.textContent="في انتظار تأكيد الدفع — الحساب لن يتفعل قبل تأكيد التحويل.";
+ details.style.display="block";details.innerHTML=isI?
+ '<div class="row"><span>حساب InstaPay</span><b>'+esc(s.payment?.address||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>':
+ '<div class="row"><span>Vodafone Cash</span><b>'+esc(s.payment?.number||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>';
+ actions.innerHTML='<button class="primary" id="pay">الذهاب للدفع الآن ←</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
+ document.querySelector("#pay").onclick=()=>{
+   navigator.clipboard?.writeText(isI?(s.payment?.address||""):(s.payment?.number||"")).catch(()=>{});
+   if(!isI){ location.href="tel:*9*7%23"; return; }
+   msg.textContent="تم نسخ عنوان InstaPay. افتح تطبيق InstaPay واختر إرسال الأموال ثم أدخل العنوان والمبلغ الظاهرين بالأعلى. InstaPay يتطلب تأكيد التحويل من داخل التطبيق.";
+ };
+ const form=document.createElement("form");form.innerHTML='<input name="reference" placeholder="رقم/مرجع عملية التحويل" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button class="primary" style="width:100%;margin-top:10px" type="submit">إرسال إثبات التحويل</button>';details.appendChild(form);
+ form.onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(form).entries());const r=await fetch("/api/subscription/manual-transfer-reference",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({...b,payment_method:s.payment_method})});const d=await r.json().catch(()=>({}));msg.textContent=r.ok?"تم إرسال رقم العملية للمراجعة. بعد تأكيد الدفع سيتم تفعيل الحساب.":(d.error||"تعذر إرسال رقم العملية.");};
+}
+async function load(){
+ if(!token){statusEl.textContent="جلسة الدفع غير موجودة. ارجع وسجل الحساب مرة أخرى.";return}
+ const r=await fetch("/api/subscription/status",{headers:{Authorization:"Bearer "+token}}).catch(()=>null);const d=r?await r.json().catch(()=>({})):{};
+ if(!r?.ok){statusEl.textContent=d.error||"تعذر التحقق من الاشتراك.";return}
+ const s=d.subscription;
+ if(s?.active){statusEl.textContent="تم تفعيل الاشتراك ✓";setTimeout(()=>location.href="/app.html",700);return}
+ if(s?.status!=="pending"){statusEl.textContent="حالة الاشتراك: "+(s?.status||"غير معروفة");return}
+ showManual(s);
+}
+load();
+</script></body></html>
