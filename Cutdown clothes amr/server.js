@@ -278,12 +278,17 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
- const profile=await supabase.from("profiles").update({brand_id:configuredBrandId(),role:"admin",name,phone}).eq("id",user.id);
- if(profile.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to BPC."});}
+ const brandId=crypto.randomUUID();
+ const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
+ const brandSlug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
+ const brand=await supabase.from("brands").insert({id:brandId,name:name+" Store",slug:brandSlug,active:true,website_url:null,settings:{}}).select("id").single();
+ if(brand.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Store workspace could not be created."});}
+ const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name,phone}).eq("id",user.id);
+ if(profile.error){await supabase.from("brands").delete().eq("id",brandId);await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to its store workspace."});}
  const paymentRef="BPC-"+crypto.randomBytes(12).toString("hex");
  const now=new Date(),activationExpires=addDays(now,1/24);
  const pending=await supabase.from("subscriptions").insert({
-   brand_id:configuredBrandId(),auth_user_id:user.id,plan_id:plan.data.id,status:"pending",
+   brand_id:brandId,auth_user_id:user.id,plan_id:plan.data.id,status:"pending",
    starts_at:null,expires_at:null,activation_code_hash:hashActivationCode(paymentRef),
    activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,
    payment_method:"paymob",updated_at:now.toISOString()
