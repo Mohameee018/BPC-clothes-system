@@ -34,6 +34,23 @@
 - Existing website data includes storefront-specific orders/reviews and product presentation fields. Preserve those; don't truncate tables or repurpose existing columns without a migration.
 - Supabase management API/database inspection was attempted during this audit, but the linked account returned a permissions error. Therefore live row counts, active policies, grants, storage policies, and current production constraints still require a successful read-only database audit before schema changes.
 
+## Live database audit completed (read-only)
+
+- The linked Supabase project is active and reachable through the `Mohamed Ahmed` linked account.
+- Current table counts observed: `brands=1`, `profiles=3`, `customers=1`, and `products=0`, `product_variants=0`, `product_images=0`, `warehouses=0`, `inventory=0`, `orders=0`, `order_items=0`, `returns=0`. These are a point-in-time snapshot, not a claim about desktop-local SQLite contents.
+- The queried schema has no `public.expenses` table. Expenses therefore need a deliberate web schema and import mapping; they must not be silently dropped from parity scope.
+- The applied migration history currently lists `complete_cutdown_shared_backend` and `lock_down_backend_functions_and_admin_tables`. The multi-brand SQL scripts in the repository are not evidence that all of those scripts have been applied to production.
+- Read-only policy inspection found public SELECT policies for active products, variants, and images, and customer/order policies that call shared admin helpers. These existing policies were written for the storefront and require a separate tenant-isolation review before multi-company data is considered secure.
+- Supabase security advisors currently report: one RLS-enabled table (`desktop_update_manifests`) without a policy; three SECURITY DEFINER functions callable by authenticated users (`claim_customer_for_auth`, `current_brand_id`, `is_brand_admin`); and leaked-password protection disabled. These are findings to review, not changes applied by this migration branch.
+
+## Phase 1 implementation on the migration branch
+
+- Added `/app` as a separate management entry point. It does not replace the storefront or `/admin`.
+- Added `/api/app/session`, `/api/app/products`, and `/api/app/inventory`. Each verifies the authenticated user's administrator role and active assigned brand, then filters records by that profile-derived `brand_id`; no client-supplied brand ID is trusted.
+- Added a read-only responsive `app.html` preview for products and inventory. It is a pilot shell, not yet a full ERP and not yet linked from the public BPC showcase.
+- Added a GitHub Actions validation workflow to check Node syntax, endpoint presence, tenant filters, and the management page.
+- This branch has not been deployed to production. No production database changes or data migrations were run.
+
 ## Incremental implementation plan
 
 ### Phase 0 — Baseline and safeguards (this branch)
