@@ -290,16 +290,15 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
  }).select("id").single();
  if(pending.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Could not create the pending subscription."});}
   const requestedMethod=String(q.body?.payment_method||"paymob").trim().toLowerCase();
- if(requestedMethod==="instapay"){
-  await supabase.from("subscriptions").update({payment_method:"instapay",activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
+ if(requestedMethod==="instapay"||requestedMethod==="vodafone_cash"){
+  const manual=await getPlatformPaymentSettings();
+  await supabase.from("subscriptions").update({payment_method:requestedMethod,activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
   return r.status(201).json({
    user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,
    subscription:{id:pending.data.id,plan:plan.data,status:"pending"},
-   payment:{method:"instapay",status:"pending",reference:paymentRef,instructions:{
-    address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),
-    bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim(),
-    amount:price,currency:"USD"
-   }}
+   payment:{method:requestedMethod,status:"pending",reference:paymentRef,instructions:requestedMethod==="instapay"?{
+    address:manual.instapayAddress,name:manual.instapayName,bank:manual.instapayBank,account:manual.instapayAccount,amount:price,currency:"EGP"
+   }:{number:manual.vodafoneCashNumber,name:manual.vodafoneCashName,amount:price,currency:"EGP"}}
   });
  }
  let payment;
@@ -345,6 +344,19 @@ app.post("/api/subscription/instapay-reference",rateLimit({windowMs:10*60*1000,m
  if(up.error)return r.status(500).json({error:"Could not save the transfer reference."});
  r.json({ok:true,subscription:up.data,status:"pending"});
 });
+app.post("/api/subscription/manual-transfer-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"manual-transfer-reference"}),async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const method=String(q.body?.payment_method||"").trim().toLowerCase(),reference=String(q.body?.reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!["instapay","vodafone_cash"].includes(method))return r.status(400).json({error:"Unsupported manual payment method."});
+ if(reference.length<3||reference.length>120)return r.status(400).json({error:"Enter a valid transaction reference."});
+ const sub=await supabase.from("subscriptions").select("id,status,payment_method").eq("auth_user_id",user.id).eq("status","pending").order("created_at",{ascending:false}).limit(1).maybeSingle();
+ if(sub.error)return r.status(500).json({error:"Could not load your pending subscription."});
+ if(!sub.data)return r.status(404).json({error:"No pending subscription was found."});
+ if(sub.data.payment_method!==method)return r.status(409).json({error:"This subscription is using a different payment method."});
+ const up=await supabase.from("subscriptions").update({payment_reference:reference,notes:notes||null,updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending").select("id,payment_reference,notes,status").single();
+ if(up.error)return r.status(500).json({error:"Could not save the transfer reference."});
+ r.json({ok:true,subscription:up.data,status:"pending"});
+});
 app.get("/api/subscription/status",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
  const sub=await getSubscriptionForUser(user.id);r.json({subscription:subscriptionView(sub)});
@@ -367,11 +379,39 @@ function isSuperAdminUser(user){
  const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
  return !!expected&&String(user?.email||"").toLowerCase()===expected;
 }
+async function getPlatformPaymentSettings(){
+ const fallback={
+  instapayAddress:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),instapayName:String(process.env.BPC_INSTAPAY_NAME||"").trim(),instapayBank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),instapayAccount:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim(),
+  vodafoneCashNumber:String(process.env.BPC_VODAFONE_CASH_NUMBER||"").trim(),vodafoneCashName:String(process.env.BPC_VODAFONE_CASH_NAME||"").trim()
+ };
+ if(!supabase)return fallback;
+ const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ if(row.error||!row.data?.settings?.payment)return fallback;
+ const p=row.data.settings.payment||{};
+ return {...fallback,instapayAddress:String(p.instapayAddress??fallback.instapayAddress).trim(),instapayName:String(p.instapayName??fallback.instapayName).trim(),instapayBank:String(p.instapayBank??fallback.instapayBank).trim(),instapayAccount:String(p.instapayAccount??fallback.instapayAccount).trim(),vodafoneCashNumber:String(p.vodafoneCashNumber??fallback.vodafoneCashNumber).trim(),vodafoneCashName:String(p.vodafoneCashName??fallback.vodafoneCashName).trim()};
+}
 async function requireSuperAdmin(req,res){
  const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
  if(!isSuperAdminUser(user))return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
  return {ok:true,user};
 }
+app.get("/api/admin/payment-settings",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ r.json(await getPlatformPaymentSettings());
+});
+app.patch("/api/admin/payment-settings",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const current=await getPlatformPaymentSettings();
+ const clean={...current};
+ for(const key of ["instapayAddress","instapayName","instapayBank","instapayAccount","vodafoneCashNumber","vodafoneCashName"]){if(Object.prototype.hasOwnProperty.call(q.body||{},key))clean[key]=String(q.body[key]||"").trim().slice(0,160)}
+ if(clean.vodafoneCashNumber&&!/^[0-9+\\s-]{8,25}$/.test(clean.vodafoneCashNumber))return r.status(400).json({error:"Invalid Vodafone Cash number."});
+ const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ if(row.error||!row.data)return r.status(404).json({error:"BPC owner brand was not found."});
+ const settings={...(row.data.settings||{}),payment:clean};
+ const up=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",configuredBrandId()).select("settings").single();
+ if(up.error)return r.status(500).json({error:"Could not save payment settings."});
+ r.json(clean);
+});
 app.get("/api/admin/brands",async(q,r)=>{const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;const brands=await supabase.from("brands").select("id,name,slug,active,website_url").order("name");if(brands.error)return r.status(500).json({error:"Could not load brands."});r.json(brands.data||[])});
 app.post("/api/admin/brands",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
@@ -454,6 +494,21 @@ app.post("/api/admin/subscriptions/approve-instapay",async(q,r)=>{
  const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
  if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
  const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:"instapay",reference:finalReference,notes:notes||null});
+ if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
+ r.json({ok:true,subscription:up.data});
+});
+app.post("/api/admin/subscriptions/approve-manual-transfer",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),reference=String(q.body?.payment_reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,payment_method,payment_reference,notes,plan_id,customer_name,customer_email,subscription_plans(code,name,duration_days,price)").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ if(sub.data.status!=="pending"||!["instapay","vodafone_cash"].includes(sub.data.payment_method))return r.status(409).json({error:"This subscription is not a pending manual payment."});
+ const finalReference=reference||String(sub.data.payment_reference||"").trim();if(!finalReference)return r.status(400).json({error:"A transaction reference is required before approval."});
+ const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
+ if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
+ const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:sub.data.payment_method,reference:finalReference,notes:notes||null});
  if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
  r.json({ok:true,subscription:up.data});
 });
