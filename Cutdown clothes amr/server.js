@@ -18,7 +18,8 @@ app.use(express.json({limit:"12mb"}));
 const blockedStatic=/^\/(?:server\.js|package(?:-lock)?\.json|\.env(?:\..*)?|supabase[^/]*\.sql)(?:$|\/)/i;
 app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
 app.use(express.static(__dirname,{index:false,etag:true,maxAge:"1h",setHeaders:(res,file)=>{if(path.extname(file).toLowerCase()===".html")res.setHeader("Cache-Control","public, max-age=0, must-revalidate")}}));
-const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY):null;
+const SUPABASE_SERVER_KEY=process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY||"";
+const supabase=process.env.SUPABASE_URL&&SUPABASE_SERVER_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_SERVER_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 const rateBuckets=new Map();
 function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
