@@ -259,6 +259,7 @@ async function requireSuperAdmin(req,res){
  if(!isSuperAdminUser(user))return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
  return {ok:true,user};
 }
+app.get("/api/admin/brands",async(q,r)=>{const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;const brands=await supabase.from("brands").select("id,name,slug,active,website_url").order("name");if(brands.error)return r.status(500).json({error:"Could not load brands."});r.json(brands.data||[])});
 app.post("/api/admin/brands",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const name=String(q.body?.name||"").trim(),slug=String(q.body?.slug||"").trim().toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");
