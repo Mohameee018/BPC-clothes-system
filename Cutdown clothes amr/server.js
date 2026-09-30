@@ -436,7 +436,7 @@ const SYSTEM_TABLES={
   warehouses:["id","desktop_id","name","location","active","created_at","updated_at"],
   inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at"],
   customers:["id","auth_user_id","desktop_id","name","email","phone","additional_phone","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
-  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","total_amount","source","shipping_amount","stock_reserved","created_at","updated_at"],
+  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","delivery_status","total_amount","discount","source","shipping_amount","stock_reserved","created_at","updated_at"],
   order_items:["id","order_id","product_id","product_name","quantity","unit_price","size","color","variant_id","desktop_id","brand_id"],
   returns:["id","desktop_id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss","created_at","processed_at","notes"],
   expenses:["id","desktop_id","amount","category","description","payment_method","status","expense_date","created_at","updated_at"]
