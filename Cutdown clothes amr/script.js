@@ -1,6 +1,5 @@
 const $=s=>document.querySelector(s);
 const fetchWithTimeout=async(url,options={},ms=3500)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);try{return await fetch(url,{...options,signal:c.signal})}finally{clearTimeout(t)}};
-const fallback=[1,2,3,4,5].map(n=>({id:"demo-"+n,name:"CUTDOWN TEE 0"+n,price:0,image_url:"assets/t shirt cutdown.jpeg",stock:0,active:true}));
 const state={products:[],cart:JSON.parse(localStorage.getItem("cutdown_cart")||"[]")};
 function money(v){return "EGP "+Number(v||0).toLocaleString("en-EG",{maximumFractionDigits:2})}
 function save(){localStorage.setItem("cutdown_cart",JSON.stringify(state.cart));renderCart()}
@@ -12,8 +11,7 @@ function productSizes(p,color){return [...new Set((p.variants||[]).filter(v=>!co
 function colorImages(p,color){
  const imgs=(p.images||[]).filter(x=>!color||!x.color||x.color===color).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
  if(imgs.length)return imgs.map(x=>x.public_url||x.storage_path).filter(Boolean).slice(0,3);
- const fallback=p.image_url?[p.image_url] : ["assets/t shirt cutdown.jpeg"];
- return fallback;
+ return p.image_url?[p.image_url]:[];
 }
 function findVariant(p,color,size){return (p.variants||[]).find(v=>String(v.color||"")===String(color||"")&&String(v.size||"")===String(size||""))}
 function openProduct(id){
@@ -27,7 +25,7 @@ function openProduct(id){
 function renderProductView(){
  if(!productView)return;
  const {p,color,size}=productView,imgs=colorImages(p,color);
- $("#productMainImage").src=imgs[0]||"assets/t shirt cutdown.jpeg";$("#productMainImage").alt=p.name+" "+color;
+ $("#productMainImage").src=imgs[0]||"";$("#productMainImage").alt=p.name+" "+color;
  $("#productThumbs").innerHTML=imgs.map((src,i)=>'<button type="button" class="product-thumb '+(i===0?"active":"")+'" data-img="'+esc(src)+'"><img src="'+esc(src)+'" alt=""></button>').join("");
  $("#productThumbs").querySelectorAll("[data-img]").forEach(b=>b.onclick=()=>{$("#productMainImage").src=b.dataset.img;$("#productThumbs").querySelectorAll(".product-thumb").forEach(x=>x.classList.remove("active"));b.classList.add("active")});
  const colors=productColors(p);
@@ -93,4 +91,4 @@ async function openAccount(){if(!authState.session)return openAuth("signin");con
 $("#accountBtn").onclick=openAccount;$("#closeAuth").onclick=()=>$("#authModal").classList.remove("open");$("#authForgot").onclick=()=>{location.href="/reset-password"};$("#authSwitch").onclick=()=>openAuth(authState.mode==="signup"?"signin":"signup");
 $("#authForm").onsubmit=async e=>{e.preventDefault();if(!authState.client)return;const f=new FormData(e.currentTarget),email=String(f.get("email")||"").trim(),password=String(f.get("password")||""),msg=$("#authMsg");msg.textContent="";const result=authState.mode==="signup"?await fetch("/api/auth/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password,name:String(f.get("name")||"").trim(),phone:String(f.get("phone")||"").trim()})}).then(async r=>({ok:r.ok,data:await r.json().catch(()=>({}))})):(()=>authState.client.auth.signInWithPassword({email,password}).then(x=>({ok:!x.error,data:x.error?{error:x.error.message}:x.data})))();if(!result.ok){msg.textContent=result.data?.error||"Could not create account.";return}if(authState.mode==="signup"&&!result.data.session)msg.textContent="Account created. Check your email to confirm it, then sign in.";else{authState.session=result.data.session;$("#authModal").classList.remove("open");updateAccountButton()}};
 
-(async()=>{initAuth();try{const r=await fetchWithTimeout("/api/products",{},3500);if(!r.ok)throw 0;const data=await r.json();state.products=Array.isArray(data)&&data.length?data:fallback}catch{state.products=fallback}renderProducts();renderCart();loadReviews();syncPaymentUI();document.body.classList.add("ready");updateHeroTarget();updateStoryDepth();animateHero()})();
+(async()=>{initAuth();try{const r=await fetchWithTimeout("/api/products",{},3500);if(!r.ok)throw 0;const data=await r.json();state.products=Array.isArray(data)?data:[]}catch{state.products=[]}renderProducts();renderCart();loadReviews();syncPaymentUI();document.body.classList.add("ready");updateHeroTarget();updateStoryDepth();animateHero()})();
