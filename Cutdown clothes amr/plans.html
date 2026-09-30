@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="خطط اشتراك BPC Clothes System لإدارة المنتجات والمخزون والطلبات والمرتجعات.">
+<title>BPC Clothes System — الاشتراكات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-serif;min-height:100vh}
+.plans-shell{min-height:100vh;padding:clamp(24px,5vw,64px) 20px;position:relative;overflow:hidden}
+.plans-shell:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 15% 15%,rgba(57,201,121,.18),transparent 35%),radial-gradient(circle at 85% 80%,rgba(142,233,177,.1),transparent 30%);pointer-events:none}
+.plans-wrap{position:relative;z-index:1;width:min(1160px,100%);margin:auto}
+.plans-top{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:56px}
+.plans-brand{font-weight:700;letter-spacing:-.04em;font-size:20px}
+.plans-back{color:rgba(247,251,248,.65);font-size:13px}
+.plans-hero{max-width:760px;margin-bottom:38px}
+.plans-eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8ee9b1;margin:0 0 16px}
+.plans-hero h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.055em;font-weight:500;margin:0 0 18px}
+.plans-hero p{color:rgba(247,251,248,.68);font-size:16px;line-height:1.7;max-width:650px;margin:0}
+.plans-promise{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.plans-promise span{padding:9px 13px;border:1px solid rgba(142,233,177,.18);background:rgba(255,255,255,.045);border-radius:999px;font-size:12px;color:rgba(247,251,248,.8);backdrop-filter:blur(12px)}
+.plans-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:stretch}
+.plan-card{position:relative;padding:28px;border-radius:24px;border:1px solid rgba(190,255,214,.16);background:rgba(8,43,25,.64);backdrop-filter:blur(22px);min-height:360px;display:flex;flex-direction:column}
+.plan-card.featured{border-color:rgba(142,233,177,.6);background:linear-gradient(145deg,rgba(57,201,121,.14),rgba(8,43,25,.72))}
+.plan-card.featured:before{content:"أفضل قيمة";position:absolute;top:18px;left:18px;background:#8ee9b1;color:#062617;padding:6px 10px;border-radius:999px;font-size:10px;font-weight:700}
+.plan-index{font-size:11px;color:rgba(247,251,248,.42);letter-spacing:.15em}
+.plan-card h2{font-size:28px;letter-spacing:-.04em;margin:24px 0 8px}
+.plan-duration{color:#8ee9b1;font-size:13px;margin:0 0 18px}
+.plan-price{font-size:38px;font-weight:600;letter-spacing:-.04em;margin:0}
+.plan-price small{font-size:12px;font-weight:400;color:rgba(247,251,248,.5)}
+.plan-copy{color:rgba(247,251,248,.64);line-height:1.6;font-size:13px;margin:14px 0 22px}
+.plan-card .plan-btn{margin-top:auto;display:flex;align-items:center;justify-content:center;border-radius:14px;padding:13px 16px;background:#39c979;color:#062617;font-weight:600}
+.plan-card .plan-btn:hover{background:#8ee9b1}
+.plans-support{margin-top:18px;padding:24px;border-radius:22px;border:1px solid rgba(142,233,177,.16);background:rgba(255,255,255,.045);display:flex;align-items:center;justify-content:space-between;gap:20px}
+.plans-support h3{margin:0 0 6px;font-size:19px}
+.plans-support p{margin:0;color:rgba(247,251,248,.6);font-size:13px;line-height:1.6}
+.plans-support a{flex:0 0 auto;padding:12px 17px;border-radius:13px;background:#fff;color:#062617;font-size:13px;font-weight:600}
+.plans-footer{margin-top:24px;display:flex;justify-content:space-between;gap:12px;color:rgba(247,251,248,.4);font-size:11px}
+@media(max-width:850px){.plans-grid{grid-template-columns:1fr}.plan-card{min-height:0}.plans-support{align-items:flex-start;flex-direction:column}.plans-support a{width:100%;text-align:center}.plans-top{margin-bottom:40px}}
+@media(max-width:520px){.plans-shell{padding-inline:16px}.plans-hero h1{font-size:44px}.plans-footer{flex-direction:column}}
+ .payment-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}.payment-method{padding:24px;border-radius:22px;border:1px solid rgba(142,233,177,.16);background:rgba(255,255,255,.045);display:flex;gap:16px;align-items:flex-start}.payment-method-icon{width:52px;height:52px;flex:0 0 52px;border-radius:15px;display:grid;place-items:center;background:rgba(57,201,121,.12);color:#8ee9b1;font-size:11px;font-weight:700;letter-spacing:.08em}.payment-method h3{margin:0 0 7px;font-size:18px}.payment-method p{margin:0 0 10px;color:rgba(247,251,248,.6);font-size:12px;line-height:1.7}.payment-method a{color:#8ee9b1;font-size:12px}.payment-method-note{display:inline-block;color:#f6d98a;font-size:11px;padding:6px 9px;border-radius:999px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15)}@media(max-width:700px){.payment-methods{grid-template-columns:1fr}}\n</style>
+</head>
+<body class="plans-page">
+<main class="plans-shell">
+<div class="plans-wrap">
+  <div class="plans-top">
+    <a class="plans-brand" href="/index.html">BPC <span style="color:#8ee9b1">CLOTHES SYSTEM</span></a>
+    <a class="plans-back" href="/index.html">العودة للموقع ←</a>
+  </div>
+
+  <section class="plans-hero">
+    <p class="plans-eyebrow">BPC CLOTHES SYSTEM · ACCESS</p>
+    <h1>اشتراك واحد، وإدارة أوضح لشغلك.</h1>
+    <p>خلّي المنتجات والمخزون والطلبات والمرتجعات في نظام واحد بدل ما تتابع شغلك بين ملفات وأدوات منفصلة. اختار المدة المناسبة ليك. الدفع الأونلاين هيكون عبر بوابة الدفع بعد اعتماد حساب التاجر، ولو هتدفع بتحويل InstaPay أو بنكي تقدر تتواصل مع الدعم للتفعيل اليدوي.</p>
+    <div class="plans-promise">
+      <span>✓ إدارة المنتجات والمخزون</span>
+      <span>✓ الطلبات والمرتجعات</span>
+      <span>✓ حساب آمن مرتبط باشتراكك</span>
+    </div>
+  </section>
+
+  <section id="plans" class="plans-grid" aria-label="باقات الاشتراك">
+    <article class="plan-card">
+      <span class="plan-index">01 / MONTHLY</span><h2>الباقة الشهرية</h2><p class="plan-duration">لمدة 30 يوم</p>
+      <p class="plan-price">1,305 <small>جنيه مصري / شهر</small></p>
+      <p class="plan-copy">كل الأدوات الأساسية لإدارة منتجاتك ومخزونك وطلباتك من مكان واحد.</p>
+      <a class="plan-btn" href="/signup.html?plan=monthly">اختار الباقة الشهرية ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">ابدأ بتنظيم شغل البراند من غير التزام طويل.</p>
+    </article>
+    <article class="plan-card">
+      <span class="plan-index">02 / 3 MONTHS</span><h2>باقة 3 شهور</h2><p class="plan-duration">لمدة 90 يوم</p>
+      <p class="plan-price">2,610 <small>جنيه مصري / 3 شهور</small></p>
+      <p class="plan-copy">استخدم السيستم لثلاث شهور بسعر إجمالي أقل من الاشتراك الشهري المتكرر.</p>
+      <a class="plan-btn" href="/signup.html?plan=quarterly">اختار باقة 3 شهور ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">مساحة أكبر لتجربة النظام وبناء روتين ثابت لإدارة الطلبات.</p>
+    </article>
+    <article class="plan-card featured">
+      <span class="plan-index">03 / YEARLY</span><h2>الباقة السنوية</h2><p class="plan-duration">لمدة سنة كاملة · 365 يوم</p>
+      <p class="plan-price">11,745 <small>جنيه مصري / سنة</small></p>
+      <p class="plan-copy">إدارة مستمرة طول السنة بسعر إجمالي أوفر من التجديدات الشهرية.</p>
+      <a class="plan-btn" href="/signup.html?plan=yearly">اختار الباقة السنوية ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">اختيار مناسب لو عايز تركز على نمو البراند بدل متابعة مواعيد التجديد.</p>
+    </article>
+  </section>
+
+  <section class="payment-methods" aria-label="طرق الدفع">
+  <article class="payment-method">
+    <div class="payment-method-icon">CARD</div>
+    <div>
+      <h3>Visa / Mastercard + Fawry Pay</h3>
+      <p>الدفع أونلاين عبر Fawry Accept بعد تفعيل حساب التاجر. بوابة Fawry تدعم مدفوعات البطاقات وFawry Pay، وسيتم تفعيل الحساب تلقائيًا بعد تأكيد الدفع من البوابة.</p>
+      <span class="payment-method-note">بانتظار تفعيل حساب Fawry Accept</span>
+    </div>
+  </article>
+  <article class="payment-method">
+    <div class="payment-method-icon">IP</div>
+    <div>
+      <h3>InstaPay / تحويل بنكي</h3>
+      <p>لو تفضّل التحويل، تواصل مع الدعم وسنرسل لك بيانات التحويل والطريقة المناسبة، وبعد تأكيد التحويل يتم إنشاء الحساب وتفعيل الباقة يدويًا.</p>
+      <a href="#support">تواصل مع الدعم ←</a>
+    </div>
+  </article>
+</section>
+
+<section class="plans-support">
+    <div>
+      <h3>الدفع أونلاين غير متاح؟</h3>
+      <p>ولا يهمك. تواصل مع الدعم، وحوّل المبلغ بالطريقة المتفق عليها، وإحنا نعمل لك الحساب ونفعّل الباقة يدويًا.</p>
+    </div>
+    <a id="support" href="https://wa.me/201080910753" target="_blank" rel="noopener noreferrer">تواصل مع الدعم عبر واتساب</a>
+  </section>
+
+  <div class="plans-footer">
+    <span>الاشتراك المدفوع مطلوب للوصول إلى نظام الإدارة. لن يتم تفعيل الحساب إلا بعد تأكيد الدفع.</span>
+    <a href="/app.html">عندي حساب بالفعل · تسجيل الدخول</a>
+  </div>
+</div>
+</main>
+<script>
+(async()=>{
+  const cfg=await fetch("/api/public-config").then(r=>r.ok?r.json():{}).catch(()=>({}));
+  const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"")||"201080910753";
+  document.querySelector("#support").href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System وأحتاج تأكيد طريقة الدفع وتفعيل الباقة.");
+})();
+</script>
+</body>
+</html>

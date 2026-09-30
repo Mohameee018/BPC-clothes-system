@@ -1,0 +1,90 @@
+name: Web migration validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [web-migration/phase-1-plan]
+
+jobs:
+  syntax-and-tenant-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate server syntax
+        run: node --check "Cutdown clothes amr/server.js"
+      # Keep this assertion block syntax-valid: every required needle must be comma-separated.
+      - name: Validate tenant-scoped preview endpoints
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = fs.readFileSync('Cutdown clothes amr/server.js', 'utf8');
+          const required = [
+            'async function requireTenantAdmin',
+            'app.get("/api/app/session"',
+            'app.get("/api/app/products"',
+            'app.get("/api/app/inventory"',
+            '.eq("brand_id",brandId)',
+            'const path="brands/"+safeFileName(q.brandId)+"/desktop/',
+            'Validate every nested payload before the first database/storage mutation.',
+            'Invalid or duplicate variant ID/stock.',
+            'preparedImages.push({img,bytes,detected})',
+            'Could not prepare product images.',
+            'Invalid JSON request body.',
+            'Request body was interrupted. Please retry.'
+          ];
+          const missing = required.filter((needle) => !source.includes(needle));
+          if (missing.length) {
+            console.error('Missing tenant-scoping safeguards:', missing);
+            process.exit(1);
+          }
+          console.log('Tenant-scoped preview endpoints and brand filters found.');
+          NODE
+      - name: Validate security hardening migration
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const path = 'supabase/migrations/20260930_security_hardening.sql';
+          const sql = fs.readFileSync(path, 'utf8').toLowerCase();
+          const required = [
+            'revoke execute on function public.claim_customer_for_auth() from public, anon, authenticated',
+            'grant execute on function public.claim_customer_for_auth() to service_role',
+            'foreign key (brand_id, product_id)',
+            'foreign key (brand_id, warehouse_id)',
+            'foreign key (brand_id, variant_id)',
+            'references public.products (brand_id, id)',
+            'references public.warehouses (brand_id, id)',
+            'references public.product_variants (brand_id, id)',
+            'references public.customers (brand_id, id)',
+            'references public.orders (brand_id, id)',
+            'not valid'
+          ];
+          const missing = required.filter((needle) => !sql.includes(needle));
+          if (missing.length) {
+            console.error('Security migration is missing required safeguards:', missing);
+            process.exit(1);
+          }
+          if (!sql.includes('begin;') || !sql.includes('commit;')) {
+            throw new Error('Security migration must be transactional.');
+          }
+          console.log('Security hardening migration structure validated.');
+          NODE
+      - name: Validate management page JavaScript syntax
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const html = fs.readFileSync('Cutdown clothes amr/app.html', 'utf8');
+          const scriptStart = html.indexOf('<script>', html.indexOf('cdn.jsdelivr'));
+          const scriptEnd = html.indexOf('</script>', scriptStart);
+          if (scriptStart < 0 || scriptEnd < 0) throw new Error('No inline management script found.');
+          new Function(html.slice(scriptStart + '<script>'.length, scriptEnd));
+          console.log('Management page inline JavaScript syntax is valid.');
+          NODE
+      - name: Validate management page exists
+        run: test -s "Cutdown clothes amr/app.html"

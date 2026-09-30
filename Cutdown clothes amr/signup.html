@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="إنشاء حساب BPC Clothes System بعد شراء الاشتراك.">
+<title>BPC Clothes System — إنشاء الحساب</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600;700&family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-serif;min-height:100vh}
+.signup-shell{min-height:100vh;display:grid;place-items:center;padding:24px;position:relative;overflow:hidden}
+.signup-shell:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 25% 20%,rgba(57,201,121,.18),transparent 35%),radial-gradient(circle at 80% 80%,rgba(142,233,177,.1),transparent 30%)}
+.signup-layout{position:relative;z-index:1;width:min(1240px,100%);display:grid;grid-template-columns:minmax(0,1.08fr) minmax(360px,.92fr);align-items:center;gap:clamp(28px,5vw,76px)}
+.signup-visual{position:relative;min-height:570px;display:grid;place-items:center;isolation:isolate}
+.signup-visual:before{content:"";position:absolute;width:min(82%,520px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(57,201,121,.25),rgba(10,83,44,.12) 48%,transparent 72%);filter:blur(8px);z-index:-1}
+.signup-visual:after{content:"BPC / CLOTHING MANAGEMENT";position:absolute;bottom:6%;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;letter-spacing:.22em;color:rgba(142,233,177,.55)}
+.character-art{width:min(100%,560px);height:auto;overflow:visible;filter:drop-shadow(0 32px 34px rgba(0,0,0,.28));animation:characterFloat 5.5s ease-in-out infinite}
+.shirt-swing{transform-box:fill-box;transform-origin:50% 12%;animation:shirtSwing 2.6s ease-in-out infinite}
+.character-arm{transform-box:fill-box;transform-origin:top center;animation:armSwing 2.6s ease-in-out infinite}
+@keyframes characterFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+@keyframes shirtSwing{0%,100%{transform:rotate(-5deg) translateX(-2px)}50%{transform:rotate(6deg) translateX(5px)}}
+@keyframes armSwing{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(3deg)}}
+.signup-card{position:relative;z-index:1;width:100%;padding:34px;border:1px solid rgba(190,255,214,.16);border-radius:28px;background:rgba(8,43,25,.68);backdrop-filter:blur(24px);box-shadow:0 28px 90px rgba(0,0,0,.25)}
+.signup-top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:34px}
+.signup-brand{font-weight:700;letter-spacing:-.04em}.signup-back{font-size:12px;color:rgba(247,251,248,.58)}
+.signup-eyebrow{font-size:11px;letter-spacing:.18em;color:#8ee9b1;margin:0 0 12px}
+.signup-card h1{font-size:clamp(40px,7vw,58px);line-height:1;letter-spacing:-.055em;font-weight:500;margin:0 0 14px}
+.signup-copy{color:rgba(247,251,248,.62);line-height:1.7;margin:0 0 24px}
+.signup-plan{padding:12px 14px;border-radius:14px;background:rgba(57,201,121,.09);border:1px solid rgba(142,233,177,.16);font-size:13px;margin-bottom:18px}
+.signup-form{display:grid;gap:12px}
+.signup-form input{width:100%;border:1px solid rgba(255,255,255,.12);background:rgba(247,251,248,.96);color:#0b1710;padding:13px 14px;border-radius:13px;outline:none}
+.signup-form input:focus{border-color:#39c979;box-shadow:0 0 0 3px rgba(57,201,121,.13)}
+.signup-form button{border:0;border-radius:14px;padding:14px;background:#39c979;color:#062617;font-weight:600;cursor:pointer}
+.signup-form button:hover{background:#8ee9b1}
+.signup-form button:disabled{opacity:.55;cursor:not-allowed}
+.payment-choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0}
+.payment-choice label{padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.04);cursor:pointer;font-size:12px}
+.payment-choice label:has(input:checked){border-color:#39c979;background:rgba(57,201,121,.1)}
+.payment-choice input{width:auto;margin-left:6px}
+.instapay-box{display:none;margin-top:14px;padding:18px;border-radius:16px;border:1px solid rgba(142,233,177,.18);background:rgba(57,201,121,.07)}
+.instapay-box.show{display:block}.instapay-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:12px}.instapay-row:last-child{border-bottom:0}.instapay-row b{color:#8ee9b1}.instapay-form{display:grid;gap:10px;margin-top:14px}.instapay-form input{width:100%;border:1px solid rgba(255,255,255,.12);background:rgba(247,251,248,.96);color:#0b1710;padding:12px 13px;border-radius:12px}.instapay-form button{border:0;border-radius:12px;padding:12px;background:#8ee9b1;color:#062617;font-weight:600;cursor:pointer}
+.signup-msg{min-height:22px;font-size:13px;line-height:1.5}
+.signup-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;padding-top:18px;border-top:1px solid rgba(255,255,255,.1);font-size:12px}
+.signup-links a{color:rgba(247,251,248,.68)}.signup-links a:hover{color:#8ee9b1}
+.signup-links b{color:#8ee9b1}
+@media(max-width:900px){.signup-layout{grid-template-columns:1fr;width:min(620px,100%);gap:4px}.signup-visual{min-height:300px;max-height:340px}.character-art{width:min(88%,340px)}.signup-visual:after{bottom:0}.signup-card{padding:26px}}
+@media(prefers-reduced-motion:reduce){.character-art,.shirt-swing,.character-arm{animation:none!important}}
+</style>
+</head>
+<body class="signup-page">
+<main class="signup-shell">
+<div class="signup-layout">
+<div class="signup-visual" aria-label="شخصية خضراء ثلاثية الأبعاد تمسك تيشيرت يتحرك برفق">
+<svg class="character-art" viewBox="0 0 560 620" role="img" aria-label="شخصية خضراء ثلاثية الأبعاد تمسك تيشيرت" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="bodyGreen" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#c7ffda"/><stop offset=".35" stop-color="#54dc88"/><stop offset=".72" stop-color="#159b56"/><stop offset="1" stop-color="#07552f"/></linearGradient>
+<linearGradient id="shirtFabric" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f7fff8"/><stop offset=".45" stop-color="#d9f6e2"/><stop offset=".8" stop-color="#a7dfba"/><stop offset="1" stop-color="#6dbb88"/></linearGradient>
+<radialGradient id="headGlow" cx=".28" cy=".18" r=".9"><stop stop-color="#edfff2"/><stop offset=".4" stop-color="#9af5b9"/><stop offset="1" stop-color="#13874a"/></radialGradient>
+</defs>
+<ellipse cx="280" cy="574" rx="145" ry="18" fill="#000" opacity=".25"/>
+<path d="M225 435 L216 535 Q215 552 234 555 L255 555 Q267 551 263 538 L270 444Z M293 440 L303 535 Q304 552 322 553 L345 553 Q358 548 349 536 L339 432Z" fill="url(#bodyGreen)"/>
+<path d="M215 540 Q236 548 260 539 L263 552 Q260 565 242 567 L204 567 Q193 562 202 550Z M305 539 Q326 547 351 538 L360 551 Q362 564 343 567 L306 565 Q296 559 305 539Z" fill="#e8fff0"/>
+<path d="M214 252 Q183 265 176 308 L161 414 Q159 437 181 442 L222 449 L228 481 Q280 501 334 481 L338 449 L381 440 Q400 434 395 412 L380 309 Q375 271 340 253Z" fill="url(#bodyGreen)"/>
+<path d="M254 223 L253 264 Q280 286 307 261 L305 220Z" fill="url(#headGlow)"/>
+<path d="M213 119 Q216 74 280 70 Q346 73 349 125 L341 188 Q331 227 281 235 Q231 229 219 188Z" fill="url(#headGlow)"/>
+<ellipse cx="256" cy="159" rx="5.5" ry="8" fill="#073d25"/><ellipse cx="306" cy="159" rx="5.5" ry="8" fill="#073d25"/>
+<ellipse cx="254" cy="156" rx="2" ry="2.5" fill="#fff"/><ellipse cx="304" cy="156" rx="2" ry="2.5" fill="#fff"/>
+<path d="M263 185 Q281 199 300 184" fill="none" stroke="#07552f" stroke-width="5" stroke-linecap="round"/>
+<path d="M205 278 Q180 291 176 324 L188 355 Q194 365 205 355 L230 324 L250 308" fill="none" stroke="url(#bodyGreen)" stroke-width="31" stroke-linecap="round" stroke-linejoin="round"/>
+<g class="character-arm"><path d="M342 274 Q367 289 371 319 L353 345 Q345 353 337 344 L319 322 L304 308" fill="none" stroke="url(#bodyGreen)" stroke-width="31" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="300" cy="303" rx="17" ry="15" fill="url(#headGlow)"/></g>
+<g class="shirt-swing">
+<path d="M240 295 L264 283 Q281 299 298 283 L324 295 L355 319 L337 348 L318 337 L316 414 Q280 428 244 414 L242 337 L222 349 L204 320Z" fill="#0a542f" opacity=".3" transform="translate(4 8)"/>
+<path d="M240 292 L264 280 Q281 296 298 280 L324 292 L353 316 L336 345 L317 334 L315 410 Q280 424 245 410 L243 334 L222 346 L205 317Z" fill="url(#shirtFabric)" stroke="#d8ffe2" stroke-width="2"/>
+<path d="M264 280 Q281 303 298 280 L291 297 Q280 307 269 297Z" fill="#74bf8a"/>
+<path d="M250 305 L251 403 Q280 414 307 403 L309 305" fill="none" stroke="#8acb9c" stroke-width="2" opacity=".8"/>
+<text x="280" y="365" text-anchor="middle" fill="#17683a" font-family="Oswald,sans-serif" font-size="17" font-weight="600" letter-spacing="3">BPC</text>
+<path d="M211 314 Q217 304 225 314 L238 329 Q241 335 235 340 L228 339 L215 329 Q207 323 211 314Z M320 303 Q328 296 335 304 L347 316 Q351 322 345 327 L338 327 L324 317 Q317 311 320 303Z" fill="url(#headGlow)"/>
+</g>
+</svg>
+</div>
+<section class="signup-card">
+  <div class="signup-top">
+    <a class="signup-brand" href="/index.html">BPC <span style="color:#8ee9b1">CLOTHES SYSTEM</span></a>
+    <a class="signup-back" href="/plans.html">الباقات</a>
+  </div>
+  <p class="signup-eyebrow">PAID ACCESS · ACCOUNT SETUP</p>
+  <h1>حسابك يبدأ من هنا.</h1>
+  <p class="signup-copy">أنشئ حسابك أولًا، وبعدها هتنتقل تلقائيًا إلى بوابة الدفع الآمنة لإتمام الاشتراك. بعد نجاح الدفع يتم تفعيل حسابك وإدخالك للنظام تلقائيًا.</p>
+  <div id="selectedPlan" class="signup-plan">جاري التحقق من الباقة…</div>
+  <form id="f" class="signup-form">
+    <input name="name" placeholder="الاسم" maxlength="120" required>
+    <input name="email" type="email" placeholder="البريد الإلكتروني" maxlength="254" required>
+    <input name="phone" placeholder="رقم الهاتف" maxlength="40">
+    <input name="password" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" minlength="8" required>
+    <div class="payment-choice" aria-label="طريقة الدفع">
+      <label><input type="radio" name="payment_method" value="paymob" checked> Visa / Mastercard</label>
+      <label><input type="radio" name="payment_method" value="instapay"> InstaPay</label><label><input type="radio" name="payment_method" value="vodafone_cash"> Vodafone Cash</label>
+    </div>
+    <button type="submit">إنشاء الحساب والمتابعة ←</button>
+    <div id="instapayBox" class="instapay-box"></div>
+    <div id="msg" class="signup-msg" aria-live="polite"></div>
+  </form>
+  <div class="signup-links">
+    <a href="/app.html">عندي حساب بالفعل · <b>تسجيل الدخول</b></a>
+    <a href="https://wa.me/201080910753?text=مرحبًا%20BPC،%20نسيت%20كلمة%20المرور%20وأحتاج%20مساعدة%20في%20استعادة%20الحساب." target="_blank" rel="noopener">نسيت الباسورد؟ <b>تواصل مع الدعم</b></a>
+    <a href="/plans.html">مش عارف تدفع؟ <b>شوف الباقات وتواصل مع الدعم</b></a>
+  </div>
+</section>
+</div>
+</main>
+<script>
+const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan"),instapayBox=document.querySelector("#instapayBox");const code=new URLSearchParams(location.search).get("plan");
+(async()=>{
+  const r=await fetch("/api/subscription/plans").catch(()=>null);
+  const d=r?await r.json().catch(()=>({})):{};
+  const plan=(d.plans||[]).find(x=>String(x.code)===String(code));
+  selected.textContent=plan?("الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP"): "اختار الباقة من صفحة الاشتراكات أولًا.";
+})();
+const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+f.onsubmit=async e=>{
+  e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
+  const button=f.querySelector("button");button.disabled=true;
+  try{
+    const body=Object.fromEntries(new FormData(f).entries());body.plan=code;
+    const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
+    if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);
+    if(d.payment?.method==="instapay"||d.payment?.method==="vodafone_cash"){
+      f.style.display="none";
+      msg.textContent="تم إنشاء الحساب بنجاح. جارٍ تحويلك لصفحة الدفع…";msg.style.color="#8ee9b1";
+      location.href="/payment.html";return;
+    }else{msg.style.color="#8ee9b1";
+      if(d.payment?.checkout_url)location.href=d.payment.checkout_url;else {msg.textContent="تم إنشاء الحساب لكن تعذر فتح بوابة الدفع. تواصل مع الدعم.";msg.style.color="#ffb4b4"}
+    }
+  }catch{msg.textContent="تعذر الاتصال بالخدمة. حاول مرة أخرى.";msg.style.color="#ffb4b4"}
+  finally{button.disabled=false}
+};
+</script>
+</body>
+</html>
