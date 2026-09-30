@@ -31,7 +31,7 @@ button,input{font:inherit}
              linear-gradient(0deg,rgba(2,14,8,.8),transparent 48%);
 }
 .shell{position:relative;z-index:2;width:min(1420px,100%);min-height:calc(100vh - 76px);display:grid;grid-template-columns:1fr minmax(350px,470px) 1fr;align-items:center;gap:clamp(34px,5vw,90px)}
-.brand-block{direction:ltr;text-align:left;align-self:center}
+.brand-block{direction:ltr;text-align:left;align-self:center;text-shadow:0 5px 28px rgba(0,0,0,.7),0 2px 8px rgba(57,201,121,.2)}
 .brand-kicker{font:500 14px/1 "Oswald",sans-serif;letter-spacing:.24em;color:var(--light);margin-bottom:18px}
 .brand{font:600 clamp(90px,12vw,180px)/.78 "Oswald",sans-serif;letter-spacing:-.055em;margin:0;color:#fff}
 .brand-sub{font:400 clamp(19px,2vw,28px)/1.25 "Readex Pro",sans-serif;color:var(--light);max-width:420px;margin:24px 0 0}
@@ -157,7 +157,7 @@ button,input{font:inherit}
   box(.45,.6,.55,skin,0,-.1,1.15,head); const pupils=[];[-.58,.58].forEach(x=>{box(.66,.44,.1,white,x,.3,1.06,head);const p=box(.24,.34,.1,dark,x,.3,1.13,head);p.userData.bx=x;pupils.push(p)}); box(1.9,.85,.3,hair,0,-.85,.98,head);box(1,.22,.28,hair,0,-.38,1.1,head);
   const core=new T.Group();core.position.set(3,2.3,0);root.add(core);const cm=new T.Mesh(new T.BoxGeometry(.9,.9,.9),green);core.add(cm);core.add(new T.LineSegments(new T.EdgesGeometry(new T.BoxGeometry(.98,.98,.98)),new T.LineBasicMaterial({color:0x8ef0b5})));const sats=[];for(let i=0;i<4;i++){const s=new T.Mesh(new T.BoxGeometry(.3,.3,.3),i%2?white:dark);s.userData.a=i*Math.PI/2;core.add(s);sats.push(s)}
   let mx=innerWidth/2,my=innerHeight/2,hx=0,hy=0; addEventListener("pointermove",e=>{mx=e.clientX;my=e.clientY},{passive:true});
-  function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();const a=w/h;root.position.set(a>1.15?a*1.45:0,-.55,0);root.scale.setScalar(a>1.15?1:Math.min(.78,a*.95))} resize();addEventListener("resize",resize,{passive:true});
+  function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();const a=w/h;root.position.set(a>1.15?a*1.45:0,-.55,0);root.scale.setScalar(a>1.15?.76:Math.min(.62,a*.8))} resize();addEventListener("resize",resize,{passive:true});
   const clock=new T.Clock();function render(){const t=clock.getElapsedTime();const tx=Math.max(-1,Math.min(1,(mx-innerWidth*.52)/(innerWidth*.45))),ty=Math.max(-1,Math.min(1,(my-innerHeight*.48)/(innerHeight*.45)));hx+=(tx-hx)*.08;hy+=(ty-hy)*.08;head.rotation.y=hx*.7;head.rotation.x=hy*.4;body.rotation.y=hx*.16;body.position.y=Math.sin(t*1.4)*.08;cm.rotation.y=t*.6;cm.rotation.x=t*.3;sats.forEach(s=>{const a=s.userData.a+t*.9;s.position.set(Math.cos(a)*1.1,Math.sin(a*.5)*.3,Math.sin(a)*1.1);s.rotation.y=t});renderer.render(scene,camera);requestAnimationFrame(render)} render();
 })();
 (async()=>{
