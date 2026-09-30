@@ -82,15 +82,14 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
   </div>
   <p class="signup-eyebrow">PAID ACCESS · ACCOUNT SETUP</p>
   <h1>حسابك يبدأ من هنا.</h1>
-  <p class="signup-copy">بعد شراء الاشتراك، استخدم كود التفعيل الذي وصلك لإنشاء حسابك وربطه تلقائيًا بالشركة والباقة الخاصة بك.</p>
+  <p class="signup-copy">أنشئ حسابك أولًا، وبعدها هتنتقل تلقائيًا إلى بوابة الدفع الآمنة لإتمام الاشتراك. بعد نجاح الدفع يتم تفعيل حسابك وإدخالك للنظام تلقائيًا.</p>
   <div id="selectedPlan" class="signup-plan">جاري التحقق من الباقة…</div>
   <form id="f" class="signup-form">
     <input name="name" placeholder="الاسم" maxlength="120" required>
     <input name="email" type="email" placeholder="البريد الإلكتروني" maxlength="254" required>
     <input name="phone" placeholder="رقم الهاتف" maxlength="40">
-    <input name="activation_code" placeholder="كود التفعيل" autocomplete="one-time-code" required>
     <input name="password" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" minlength="8" required>
-    <button type="submit">إنشاء الحساب وتفعيل الاشتراك ←</button>
+    <button type="submit">إنشاء الحساب والانتقال للدفع ←</button>
     <div id="msg" class="signup-msg" aria-live="polite"></div>
   </form>
   <div class="signup-links">
@@ -107,19 +106,19 @@ const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected
   const r=await fetch("/api/subscription/plans").catch(()=>null);
   const d=r?await r.json().catch(()=>({})):{};
   const plan=(d.plans||[]).find(x=>String(x.code)===String(code));
-  selected.textContent=plan?("الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP"): "لديك كود تفعيل جاهز؟ أدخله هنا لإكمال التسجيل.";
+  selected.textContent=plan?("الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP"): "اختار الباقة من صفحة الاشتراكات أولًا.";
 })();
 f.onsubmit=async e=>{
   e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
   const button=f.querySelector("button");button.disabled=true;
   try{
-    const body=Object.fromEntries(new FormData(f).entries());
+    const body=Object.fromEntries(new FormData(f).entries());body.plan=code;
     const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
-    msg.textContent=d.requires_email_confirmation?"تم إنشاء الحساب. راجع بريدك لتأكيد الحساب ثم سجل الدخول.":"تم إنشاء الحساب وتفعيل الاشتراك. يمكنك الدخول الآن.";
+    if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);msg.textContent="تم إنشاء الحساب. جارٍ تحويلك إلى بوابة الدفع…";
     msg.style.color="#8ee9b1";
-    if(d.session){sessionStorage.setItem("bpc_admin_token",d.session.access_token);location.href="/app.html"}
+    if(d.payment?.checkout_url)location.href=d.payment.checkout_url;else {msg.textContent="تم إنشاء الحساب لكن تعذر فتح بوابة الدفع. تواصل مع الدعم.";msg.style.color="#ffb4b4"}
   }catch{msg.textContent="تعذر الاتصال بالخدمة. حاول مرة أخرى.";msg.style.color="#ffb4b4"}
   finally{button.disabled=false}
 };
