@@ -498,7 +498,12 @@ app.get("/api/admin/subscriptions",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const subs=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,notes,created_at,last_renewed_at,subscription_plans(code,name,duration_days,price)").order("expires_at",{ascending:false}).limit(500);
  if(subs.error)return r.status(500).json({error:"Could not load subscriptions."});
- r.json(subs.data||[]);
+ const rows=subs.data||[];
+ const userIds=[...new Set(rows.map(x=>x.auth_user_id).filter(Boolean))];
+ const profiles=userIds.length?await supabase.from("profiles").select("id,phone").in("id",userIds):{data:[],error:null};
+ if(profiles.error)return r.status(500).json({error:"Could not load customer contact details."});
+ const phones=new Map((profiles.data||[]).map(x=>[x.id,x.phone||""]));
+ r.json(rows.map(x=>({...x,customer_phone:phones.get(x.auth_user_id)||""})));
 });
 app.post("/api/admin/subscriptions/create",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
