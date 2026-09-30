@@ -245,14 +245,17 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a BPC company administrator."});}
  const brand=await supabase.from("brands").select("id,name,slug,active").eq("id",profile.brand_id).maybeSingle();
  if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This company is inactive or unavailable."});}
- const gate=await requireActiveSubscription(user.id,r);
+ const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);
  if(!gate.ok){await authClient.auth.signOut();return gate.response;}
  r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data,subscription:gate.view});
 });
+function isSuperAdminUser(user){
+ const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
+ return !!expected&&String(user?.email||"").toLowerCase()===expected;
+}
 async function requireSuperAdmin(req,res){
  const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
- const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
- if(!expected||String(user.email||"").toLowerCase()!==expected)return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
+ if(!isSuperAdminUser(user))return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
  return {ok:true,user};
 }
 app.post("/api/admin/brands",async(q,r)=>{
@@ -367,7 +370,7 @@ app.get("/api/auth/me",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id);
  if(profile?.role==="admin"){
-   const gate=await requireActiveSubscription(user.id,r);if(!gate.ok)return gate.response;
+   const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);if(!gate.ok)return gate.response;
    return r.json({user:{id:user.id,email:user.email||null},profile,subscription:gate.view});
  }
  r.json({user:{id:user.id,email:user.email||null},profile,subscription:null});
