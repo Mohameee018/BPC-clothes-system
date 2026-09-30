@@ -25,7 +25,7 @@ button,input{font:inherit}
     radial-gradient(circle at 52% 46%,rgba(57,201,121,.18),transparent 34%),linear-gradient(90deg,#04150b 0%,#082a18 50%,#04150b 100%);
   transform:scale(1.03);
 }
-.character-art{position:absolute;left:50%;top:50%;width:min(43vw,560px);height:auto;max-height:90vh;transform:translate(-50%,-50%);z-index:1;pointer-events:none;filter:drop-shadow(0 32px 34px rgba(0,0,0,.28));animation:characterFloat 5.5s ease-in-out infinite}
+.character-art{position:absolute;left:calc(50% + 205px);top:50%;width:min(43vw,560px);height:auto;max-height:90vh;transform:translate(-50%,-50%);z-index:1;pointer-events:none;filter:drop-shadow(0 32px 34px rgba(0,0,0,.28));animation:characterFloat 5.5s ease-in-out infinite}
 .shirt-swing{transform-box:fill-box;transform-origin:50% 12%;animation:shirtSwing 2.6s ease-in-out infinite}
 .character-arm{transform-box:fill-box;transform-origin:top center;animation:armSwing 2.6s ease-in-out infinite}
 @keyframes characterFloat{0%,100%{translate:0 0}50%{translate:0 -11px}}
@@ -84,7 +84,7 @@ button,input{font:inherit}
   .about p{margin-inline:auto}.about-points{display:flex;justify-content:center;flex-wrap:wrap}
   .brand-block{grid-column:1;grid-row:2}.login-card{grid-column:2;grid-row:2}
 }
-@media(max-width:700px){.character-art{width:min(72vw,340px);top:22%;opacity:.6}.page:after{background:linear-gradient(180deg,rgba(2,14,8,.25),rgba(2,14,8,.86) 45%)}
+@media(max-width:700px){.character-art{width:min(72vw,340px);left:72%;top:24%;opacity:.72}.page:after{background:linear-gradient(180deg,rgba(2,14,8,.25),rgba(2,14,8,.86) 45%)}
   .page{padding:22px}.shell{min-height:auto;grid-template-columns:1fr;gap:26px;padding:35px 0}
   .about,.brand-block,.login-card{grid-column:auto;grid-row:auto}
   .about{text-align:center}.about h1{margin-inline:auto}
