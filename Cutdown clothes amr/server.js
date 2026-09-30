@@ -426,7 +426,7 @@ app.get("/api/app/inventory",rateLimit({windowMs:60*1000,max:90,keyPrefix:"app-i
 app.get("/api/admin/ping",async(q,r)=>{const admin=await requireBrandAdmin(q,r);if(!admin)return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:admin.profile.brand_id})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const accountProfile=await getAuthProfile(user.id); if(!accountProfile?.brand_id||String(accountProfile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
+ const accountProfile=await getAuthProfile(user.id); if(!accountProfile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
@@ -437,7 +437,7 @@ app.post("/api/account/profile",async(q,r)=>{
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
- const profile=await getAuthProfile(user.id); if(!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"This account is not assigned to this brand."});
+ const profile=await getAuthProfile(user.id); if(!profile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});
  const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String(profile.brand_id)).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json({customer,orders:orders.data||[]});
 });
