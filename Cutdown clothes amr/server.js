@@ -278,6 +278,14 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
+ // Create a normal authenticated session for the newly created account. The management
+ // area remains protected by the pending subscription gate, while the payment page can
+ // securely read only this user's pending subscription.
+ const paymentSession=await authClient.auth.signInWithPassword({email,password});
+ if(paymentSession.error||!paymentSession.data?.session){
+  await supabase.auth.admin.deleteUser(user.id);
+  return r.status(500).json({error:"Account was created but the payment session could not be started."});
+ }
  const brandId=crypto.randomUUID();
  const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
  const brandSlug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
@@ -312,7 +320,7 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
   const manual=await getPlatformPaymentSettings();
   await supabase.from("subscriptions").update({payment_method:requestedMethod,activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
   return r.status(201).json({
-   user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,
+   user:{id:user.id,email:user.email||email},session:paymentSession.data.session,requires_email_confirmation:false,
    subscription:{id:pending.data.id,plan:plan.data,status:"pending"},
    payment:{method:requestedMethod,status:"pending",reference:paymentRef,instructions:requestedMethod==="instapay"?{
     address:manual.instapayAddress,name:manual.instapayName,bank:manual.instapayBank,account:manual.instapayAccount,amount:price,currency:"EGP"
