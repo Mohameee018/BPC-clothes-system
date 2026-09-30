@@ -1,6 +1,6 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BPC — Admin Login</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px;display:flex;align-items:center;justify-content:center">
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BPC — Owner Dashboard</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px;display:flex;align-items:center;justify-content:center">
 <section id="adminLogin" class="checkout-card glass" style="max-width:520px;width:100%">
-<p class="eyebrow">BPC ADMIN</p><h1 style="font-size:52px;font-weight:400;margin:0 0 16px">Admin Login</h1>
+<p class="eyebrow">BPC OWNER</p><h1 style="font-size:52px;font-weight:400;margin:0 0 16px">Owner Dashboard</h1>
 <p style="color:#999;line-height:1.7">تسجيل الدخول هنا خاص بلوحة الإدارة. لن يتم تحويلك للمتجر بعد تسجيل الدخول.</p>
 <form id="adminLoginForm" style="display:grid;gap:12px;margin-top:24px">
 <input id="adminEmail" type="email" placeholder="Email" autocomplete="username" required>
@@ -10,12 +10,20 @@
 </section>
 <section id="adminShell" style="display:none;width:100%">
 <section class="checkout-card glass" style="max-width:1100px;width:100%;margin:auto">
-<p class="eyebrow">CUTDOWN ADMIN</p><h1>Orders.</h1><p id="info">Checking access…</p>
+<p class="eyebrow">BPC OWNER DASHBOARD</p><h1>System Management.</h1><p id="info">Checking access…</p>
 <div style="display:flex;gap:12px;flex-wrap:wrap;margin:18px 0"><button class="btn" id="logout">Sign out <span>→</span></button></div>
-<div id="orders">Loading orders…</div></section>
-<section id="subscriptionAdmin" class="checkout-card glass" style="max-width:1100px;width:100%;margin:24px auto;padding:22px">
-<p class="eyebrow">SUBSCRIPTIONS</p><h2>Pending InstaPay Payments</h2><p style="opacity:.65">مراجعة التحويلات اليدوية وتفعيل الحساب بعد التأكد من وصول المبلغ.</p><div id="subscriptionList">Loading…</div></section>
-</section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
+<div id="stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:18px 0"></div>
+</section>
+<section class="checkout-card glass" style="max-width:1100px;width:100%;margin:24px auto;padding:22px">
+<p class="eyebrow">PAYMENT SETTINGS</p><h2>بيانات التحويل اليدوي</h2><p style="opacity:.65">دي إعدادات حسابك أنت لاستقبال التحويلات. تقدر تغيّرها من هنا بدون تعديل Railway أو الكود.</p>
+<form id="paymentSettingsForm" style="display:grid;gap:12px;margin-top:16px">
+<input id="vodafoneCashNumber" placeholder="رقم Vodafone Cash" maxlength="25"><input id="vodafoneCashName" placeholder="اسم صاحب المحفظة" maxlength="160">
+<input id="instapayAddress" placeholder="InstaPay Address" maxlength="160"><input id="instapayName" placeholder="اسم المستفيد" maxlength="160"><input id="instapayBank" placeholder="البنك" maxlength="160"><input id="instapayAccount" placeholder="رقم الحساب" maxlength="160">
+<button class="btn" type="submit">حفظ بيانات الدفع</button><p id="paymentMsg" style="min-height:24px"></p>
+</form></section>
+<section class="checkout-card glass" style="max-width:1100px;width:100%;margin:24px auto;padding:22px">
+<p class="eyebrow">SUBSCRIPTIONS</p><h2>Pending Manual Payments</h2><p style="opacity:.65">تحويلات InstaPay و Vodafone Cash المعلقة. التفعيل يتم يدويًا بعد التأكد من وصول المبلغ.</p><div id="subscriptionList">Loading…</div></section>
+</section></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
 <script>
 (async()=>{
  const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -48,35 +56,11 @@
      return;
    }
    showAdmin();
-   document.querySelector("#info").textContent="Admin access confirmed.";
-   const load=async()=>{
-     const r=await fetch("/api/admin/orders",{headers:h});
-     const data=await r.json().catch(()=>[]);
-     if(!r.ok){document.querySelector("#orders").textContent=data.error||"Failed to load orders.";return;}
-     document.querySelector("#orders").innerHTML=data.length?data.map(o=>'<article style="border:1px solid rgba(255,255,255,.12);padding:18px;margin:12px 0;border-radius:14px"><strong>'+esc(o.id)+'</strong><p>'+esc(o.customer_name||"")+" · "+esc(o.customer_phone||"")+" · "+esc(o.total_amount||0)+" EGP</p><p>"+esc(o.order_status||"")+" · "+esc(o.delivery_status||"")+" · "+esc(o.payment_status||"")+'</p><select data-id="'+String(o.id)+'" class="status"><option value="Pending">Pending</option><option value="With Shipping Company">With Shipping Company</option><option value="Out for Delivery">Out for Delivery</option><option value="Delivered">Delivered</option><option value="Returned">Returned</option></select></article>').join(""):"No website orders yet.";
-     data.forEach(o=>{const x=document.querySelector('.status[data-id="'+o.id+'"]');if(x)x.value=o.delivery_status||"Pending";});
-     document.querySelectorAll(".status").forEach(x=>x.onchange=async()=>{
-       const rr=await fetch("/api/admin/orders/status",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({order_id:x.dataset.id,delivery_status:x.value})});
-       if(!rr.ok)alert("Could not update order.");
-     });
-   };
-   const loadSubscriptions=async()=>{
-     const box=document.querySelector("#subscriptionList");
-     const r=await fetch("/api/admin/subscriptions",{headers:h});
-     const data=await r.json().catch(()=>[]);
-     if(!r.ok){box.textContent="Subscription admin access unavailable.";return;}
-     const pending=(data||[]).filter(x=>x.status==="pending"&&x.payment_method==="instapay");
-     box.innerHTML=pending.length?pending.map(x=>'<article style="border:1px solid rgba(255,255,255,.12);padding:16px;margin:12px 0;border-radius:14px"><strong>'+esc(x.customer_name||"")+'</strong><p>'+esc(x.customer_email||"")+" · "+esc(x.subscription_plans?.name||"")+" · "+esc(x.subscription_plans?.price||0)+"</p><p>InstaPay ref: <b>"+esc(x.payment_reference||"لم يُرسل بعد")+'</b></p><p style="opacity:.55;font-size:12px">'+esc(x.id)+'</p><button class="btn approve-sub" data-id="'+esc(x.id)+'" data-ref="'+esc(x.payment_reference||"")+'" '+(x.payment_reference?"":"disabled")+'>تأكيد التحويل وتفعيل الحساب</button></article>').join(""):"لا توجد تحويلات InstaPay معلقة.";
-     box.querySelectorAll(".approve-sub").forEach(btn=>btn.onclick=async()=>{
-       if(!confirm("تأكدت من وصول التحويل؟ سيتم تفعيل الاشتراك فورًا."))return;
-       btn.disabled=true;
-       const rr=await fetch("/api/admin/subscriptions/approve-instapay",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({subscription_id:btn.dataset.id,payment_reference:btn.dataset.ref})});
-       const dd=await rr.json().catch(()=>({}));
-       if(!rr.ok){alert(dd.error||"تعذر تفعيل الاشتراك.");btn.disabled=false;return;}
-       await loadSubscriptions();
-     });
-   };
-   await load(); await loadSubscriptions();
+   document.querySelector("#info").textContent="Owner access confirmed.";
+   const loadOwner=async()=>{const r=await fetch("/api/admin/subscriptions",{headers:h});const data=await r.json().catch(()=>[]);if(!r.ok){document.querySelector("#subscriptionList").textContent=data.error||"Failed to load subscriptions.";return}const pending=(data||[]).filter(x=>x.status==="pending"&&["instapay","vodafone_cash"].includes(x.payment_method));const active=(data||[]).filter(x=>x.status==="active").length;document.querySelector("#stats").innerHTML='<div class="checkout-card glass" style="padding:16px"><b>'+active+'</b><div style="opacity:.65">Active subscriptions</div></div><div class="checkout-card glass" style="padding:16px"><b>'+pending.length+'</b><div style="opacity:.65">Pending manual payments</div></div><div class="checkout-card glass" style="padding:16px"><b>'+data.length+'</b><div style="opacity:.65">Total subscriptions</div></div>';document.querySelector("#subscriptionList").innerHTML=pending.length?pending.map(x=>'<article style="border:1px solid rgba(255,255,255,.12);padding:16px;margin:12px 0;border-radius:14px"><strong>'+esc(x.customer_name||"")+'</strong><p>'+esc(x.customer_email||"")+" · "+esc(x.subscription_plans?.name||"")+" · "+esc(x.subscription_plans?.price||0)+" EGP</p><p>"+(x.payment_method==="vodafone_cash"?"Vodafone Cash":"InstaPay")+" · ref: <b>"+esc(x.payment_reference||"لم يُرسل بعد")+'</b></p><button class="btn approve-sub" data-id="'+esc(x.id)+'" data-ref="'+esc(x.payment_reference||"")+'" '+(x.payment_reference?"":"disabled")+'>تأكيد التحويل وتفعيل الحساب</button></article>').join(""):"لا توجد تحويلات يدوية معلقة.";document.querySelectorAll(".approve-sub").forEach(btn=>btn.onclick=async()=>{if(!confirm("تأكدت من وصول التحويل؟ سيتم تفعيل الاشتراك فورًا."))return;btn.disabled=true;const rr=await fetch("/api/admin/subscriptions/approve-manual-transfer",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({subscription_id:btn.dataset.id,payment_reference:btn.dataset.ref})});const dd=await rr.json().catch(()=>({}));if(!rr.ok){alert(dd.error||"تعذر تفعيل الاشتراك.");btn.disabled=false;return}await loadOwner()})};
+   const loadPaymentSettings=async()=>{const r=await fetch("/api/admin/payment-settings",{headers:h});const d=await r.json().catch(()=>({}));if(!r.ok){document.querySelector("#paymentMsg").textContent=d.error||"تعذر تحميل إعدادات الدفع.";return}for(const [id,key] of [["vodafoneCashNumber","vodafoneCashNumber"],["vodafoneCashName","vodafoneCashName"],["instapayAddress","instapayAddress"],["instapayName","instapayName"],["instapayBank","instapayBank"],["instapayAccount","instapayAccount"]])document.querySelector("#"+id).value=d[key]||""};
+   document.querySelector("#paymentSettingsForm").onsubmit=async e=>{e.preventDefault();const body={vodafoneCashNumber:document.querySelector("#vodafoneCashNumber").value,vodafoneCashName:document.querySelector("#vodafoneCashName").value,instapayAddress:document.querySelector("#instapayAddress").value,instapayName:document.querySelector("#instapayName").value,instapayBank:document.querySelector("#instapayBank").value,instapayAccount:document.querySelector("#instapayAccount").value};const r=await fetch("/api/admin/payment-settings",{method:"PATCH",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));document.querySelector("#paymentMsg").textContent=r.ok?"تم حفظ بيانات الدفع.":(d.error||"تعذر حفظ البيانات.")};
+   await loadPaymentSettings();await loadOwner();
    document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();showLogin("تم تسجيل الخروج.");};
  };
  loginForm.onsubmit=async e=>{
