@@ -32,7 +32,7 @@
 - The current Express desktop-sync guard compares a user's `brand_id` to one configured `CUTDOWN_BRAND_ID`. That is a single-brand gate and must be redesigned before onboarding multiple companies. Tenant identity must come from the authenticated user's trusted server-side profile, never from a client-supplied brand ID.
 - Product and variant sync already writes product/variant and inventory data, but the inventory model differs from desktop's per-warehouse and history model. Reconcile those semantics before treating cloud inventory as canonical.
 - Existing website data includes storefront-specific orders/reviews and product presentation fields. Preserve those; don't truncate tables or repurpose existing columns without a migration.
-- Supabase management API/database inspection was attempted during this audit, but the linked account returned a permissions error. Therefore live row counts, active policies, grants, storage policies, and current production constraints still require a successful read-only database audit before schema changes.
+- The initial Supabase inspection attempt failed with a permissions error, but access was subsequently restored and a read-only live audit was completed. See “Live database audit completed” above. Production constraints and Storage policies still require a targeted review before any schema changes.
 
 ## Live database audit completed (read-only)
 
