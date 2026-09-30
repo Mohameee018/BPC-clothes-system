@@ -289,6 +289,19 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
    payment_method:"paymob",updated_at:now.toISOString()
  }).select("id").single();
  if(pending.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Could not create the pending subscription."});}
+  const requestedMethod=String(q.body?.payment_method||"paymob").trim().toLowerCase();
+ if(requestedMethod==="instapay"){
+  await supabase.from("subscriptions").update({payment_method:"instapay",activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
+  return r.status(201).json({
+   user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,
+   subscription:{id:pending.data.id,plan:plan.data,status:"pending"},
+   payment:{method:"instapay",status:"pending",reference:paymentRef,instructions:{
+    address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),
+    bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim(),
+    amount:price,currency:"USD"
+   }}
+  });
+ }
  let payment;
  try{payment=await createPaymobIntention({amountCents:Math.round(price*100),email,name,phone,planName:plan.data.name,paymentRef});}
  catch(error){
@@ -299,7 +312,6 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
   return r.status(502).json({error:"Could not start the secure payment checkout. Please try again."});
  }
  r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{id:pending.data.id,plan:plan.data},payment:{checkout_url:paymobCheckoutUrl(payment.clientSecret),reference:paymentRef}});
-});
 app.post("/api/payments/paymob/webhook",async(q,r)=>{
  const received=String(q.query?.hmac||"").trim(),obj=q.body?.obj;
  if(!paymobTxnHmacValid(obj,received))return r.status(200).json({ok:false});
@@ -319,6 +331,18 @@ app.post("/api/payments/paymob/webhook",async(q,r)=>{
   activation_code_hash:null,activation_expires_at:null,payment_method:"paymob",updated_at:now.toISOString()
  }).eq("id",sub.data.id).eq("status","pending");
  r.status(200).json({ok:true});
+});
+app.post("/api/subscription/instapay-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"instapay-reference"}),async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const reference=String(q.body?.reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(reference.length<3||reference.length>120)return r.status(400).json({error:"Enter a valid InstaPay transaction reference."});
+ const sub=await supabase.from("subscriptions").select("id,status,payment_method,plan_id").eq("auth_user_id",user.id).eq("status","pending").order("created_at",{ascending:false}).limit(1).maybeSingle();
+ if(sub.error)return r.status(500).json({error:"Could not load your pending subscription."});
+ if(!sub.data)return r.status(404).json({error:"No pending subscription was found."});
+ if(sub.data.payment_method!=="instapay")return r.status(409).json({error:"This subscription is not using InstaPay."});
+ const up=await supabase.from("subscriptions").update({payment_reference:reference,notes:notes||null,updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending").select("id,payment_reference,notes,status").single();
+ if(up.error)return r.status(500).json({error:"Could not save the transfer reference."});
+ r.json({ok:true,subscription:up.data,status:"pending"});
 });
 app.get("/api/subscription/status",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
@@ -416,6 +440,22 @@ app.post("/api/admin/subscriptions/activation",async(q,r)=>{
  await supabase.from("subscription_payments").insert({subscription_id:ins.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:"manual",reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
  r.status(201).json({activation_code:code,expires_at:activationExpires.toISOString(),plan:plan.data,customer:{name,email}});
 });
+app.post("/api/admin/subscriptions/approve-instapay",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),reference=String(q.body?.payment_reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,payment_method,payment_reference,notes,plan_id,customer_name,customer_email,subscription_plans(code,name,duration_days,price)").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ if(sub.data.status!=="pending"||sub.data.payment_method!=="instapay")return r.status(409).json({error:"This subscription is not a pending InstaPay payment."});
+ const finalReference=reference||String(sub.data.payment_reference||"").trim();
+ if(!finalReference)return r.status(400).json({error:"A transaction reference is required before approval."});
+ const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
+ if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
+ const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:"instapay",reference:finalReference,notes:notes||null});
+ if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
+ r.json({ok:true,subscription:up.data});
+});
 app.post("/api/admin/subscriptions/renew",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),amount=Number(q.body?.amount||0);
@@ -455,7 +495,7 @@ app.get("/api/desktop/update",async(q,r)=>{
  }
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
-app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim()})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
+app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim(),instapay:{address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim()}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
 app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"customer-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),slug=String(q.body?.brand_slug||"").trim().toLowerCase();
