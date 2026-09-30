@@ -274,7 +274,7 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
  if(!plan.data)return r.status(400).json({error:"The selected subscription plan is unavailable."});
  const price=Number(plan.data.price||0);
  if(!Number.isFinite(price)||price<=0)return r.status(400).json({error:"The selected plan has an invalid price."});
- const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone}}});
+ const signed=await supabase.auth.admin.createUser({email,password,email_confirm:false,user_metadata:{name,phone}});
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
