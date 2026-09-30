@@ -276,6 +276,62 @@ app.post("/api/admin/orders/status",async(q,r)=>{
  if(updated.error)return r.status(500).json({error:"Internal server error."});if(!updated.data)return r.status(404).json({error:"Website order not found."});r.json({ok:true,order:updated.data});
 });
 
+/* BPC system API — tenant-scoped management surface. */
+const SYSTEM_TABLES={
+  products:["id","desktop_id","sku","name","category","description","image_path","price","cost_price","stock","minimum_stock","active","is_active","created_at","updated_at"],
+  product_variants:["id","product_id","desktop_variant_id","sku","size","color","stock","active","created_at","updated_at"],
+  warehouses:["id","desktop_id","name","location","active","created_at","updated_at"],
+  inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at","created_at"],
+  customers:["id","desktop_id","name","phone","email","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
+  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","delivery_status","total_amount","discount","shipping_cost","created_at","updated_at"],
+  order_items:["id","order_id","product_id","variant_id","product_name","sku","category","size","color","quantity","unit_price","cost_price","line_total","created_at"],
+  returns:["id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss_amount","status","created_at"],
+  expenses:["id","desktop_id","amount","category","description","payment_method","status","expense_date","created_at","updated_at"]
+};
+const SYSTEM_WRITE_TABLES=new Set(["products","product_variants","warehouses","inventory","customers","expenses"]);
+async function requireSystemAdmin(q,r){
+  if(!supabase)return {ok:false,response:r.status(503).json({error:"Supabase is not configured."})};
+  const user=await getAuthUser(q); if(!user)return {ok:false,response:r.status(401).json({error:"Not authenticated."})};
+  const profile=await getAuthProfile(user.id);
+  if(profile?.role!=="admin"||!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return {ok:false,response:r.status(403).json({error:"BPC administrator access required."})};
+  q.systemUser=user;q.brandId=String(profile.brand_id);return {ok:true,user,profile};
+}
+function systemColumns(table,obj){const allowed=new Set(SYSTEM_TABLES[table]||[]);const out={};for(const [k,v] of Object.entries(obj||{}))if(allowed.has(k)&&k!=="id"&&k!=="brand_id"&&k!=="created_at"&&k!=="updated_at")out[k]=v;return out}
+app.get("/api/system/summary",async(q,r)=>{
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const counts={};for(const table of ["products","product_variants","warehouses","inventory","customers","orders","returns","expenses"]){const x=await supabase.from(table).select("id",{count:"exact",head:true}).eq("brand_id",q.brandId);if(x.error)return r.status(500).json({error:"Could not load system summary."});counts[table]=x.count||0}
+  const revenue=await supabase.from("orders").select("total_amount").eq("brand_id",q.brandId).neq("order_status","cancelled");if(revenue.error)return r.status(500).json({error:"Could not load system summary."});
+  r.json({counts,revenue:(revenue.data||[]).reduce((n,x)=>n+Number(x.total_amount||0),0)});
+});
+app.get("/api/system/:table",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_TABLES[table])return r.status(404).json({error:"Unknown system resource."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).limit(limit);
+  const search=String(q.query.search||"").trim();if(search&&["products","customers","warehouses","expenses"].includes(table)){const field=table==="products"?"name":table==="customers"?"name":table==="warehouses"?"name":"description";query=query.ilike(field,"%"+search.replace(/[%_]/g,"") +"%")}
+  query=query.order("created_at",{ascending:false});
+  const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});r.json(result.data||[]);
+});
+app.post("/api/system/:table",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const row=systemColumns(table,q.body);row.brand_id=q.brandId;
+  if(table==="products"){if(!String(row.name||"").trim())return r.status(400).json({error:"Product name is required."});row.name=String(row.name).trim();row.price=Number(row.price||0);row.cost_price=Number(row.cost_price||0);row.stock=Number.isSafeInteger(Number(row.stock))?Number(row.stock):0;row.minimum_stock=Number.isSafeInteger(Number(row.minimum_stock))?Number(row.minimum_stock):0;row.active=row.active!==false;row.is_active=row.active}
+  if(table==="warehouses"&&!String(row.name||"").trim())return r.status(400).json({error:"Warehouse name is required."});
+  if(table==="customers"&&!String(row.name||"").trim())return r.status(400).json({error:"Customer name is required."});
+  const ins=await supabase.from(table).insert(row).select(SYSTEM_TABLES[table].join(",")).single();if(ins.error)return r.status(400).json({error:"Could not create "+table+" record.",detail:ins.error.message});r.status(201).json(ins.data);
+});
+app.patch("/api/system/:table/:id",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const patch=systemColumns(table,q.body);patch.updated_at=new Date().toISOString();
+  const up=await supabase.from(table).update(patch).eq("id",q.params.id).eq("brand_id",q.brandId).select(SYSTEM_TABLES[table].join(",")).maybeSingle();if(up.error)return r.status(400).json({error:"Could not update record.",detail:up.error.message});if(!up.data)return r.status(404).json({error:"Record not found."});r.json(up.data);
+});
+app.delete("/api/system/:table/:id",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const del=await supabase.from(table).delete().eq("id",q.params.id).eq("brand_id",q.brandId);if(del.error)return r.status(400).json({error:"Could not delete record.",detail:del.error.message});r.json({ok:true});
+});
+
 /* Railway healthcheck: keep this endpoint lightweight and independent of external services.
    The application can still report Supabase failures through its normal API endpoints. */
 app.get("/api/health",(_q,r)=>r.status(200).json({ok:true,service:"bpc-clothes-system"}));
