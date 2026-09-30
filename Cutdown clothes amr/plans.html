@@ -1,0 +1,12 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BPC Clothes System — الاشتراكات</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px"><section class="checkout-card glass" style="max-width:1000px;width:100%;margin:auto"><p class="eyebrow">BPC CLOTHES SYSTEM</p><h1>اختار باقة الاشتراك</h1><p style="opacity:.8">الوصول لنظام الإدارة متاح فقط للحسابات المرتبطة باشتراك مدفوع. بياناتك تفضل محفوظة حتى لو الاشتراك انتهى.</p><div id="plans" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:24px">Loading…</div><div style="margin-top:24px;padding:18px;border:1px solid rgba(255,255,255,.12);border-radius:14px"><h3>مش عارف تدفع أونلاين؟</h3><p>تقدر تتواصل مع الإدارة للتحويل يدويًا، وبعد تأكيد الدفع هيوصلك كود تفعيل أو بيانات الحساب.</p><a id="contact" class="btn" href="#">تواصل مع الإدارة</a></div><div style="margin-top:18px"><a class="btn" href="/app.html">دخول النظام</a></div></section></main><script>
+(async()=>{
+ const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+ const cfg=await fetch("/api/public-config").then(r=>r.json()).catch(()=>({}));
+ const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"");
+ const contact=document.querySelector("#contact");
+ if(wa)contact.href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System");
+ else{contact.href="mailto:support@bpc.local";contact.textContent="تواصل مع الإدارة";}
+ const r=await fetch("/api/subscription/plans"),d=await r.json();
+ document.querySelector("#plans").innerHTML=r.ok?(d.plans||[]).map(p=>'<article style="padding:22px;border:1px solid rgba(255,255,255,.12);border-radius:16px"><h2>'+esc(p.name)+'</h2><p>'+Number(p.duration_days/30).toFixed(p.duration_days===365?0:1)+' شهر</p><h3>'+Number(p.price||0).toLocaleString("ar-EG")+' EGP</h3><a class="btn" href="/signup.html?plan='+encodeURIComponent(p.code)+'">لدي كود تفعيل</a></article>').join(""):"تعذر تحميل الباقات.";
+})();
+</script></body></html>
