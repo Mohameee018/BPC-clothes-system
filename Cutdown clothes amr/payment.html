@@ -11,12 +11,11 @@ body{margin:0;background:#061b10;color:#f7fbf8;font-family:"Readex Pro",Arial,sa
 .primary{background:#39c979;color:#062617}.secondary{background:rgba(255,255,255,.08);color:#f7fbf8;border:1px solid rgba(255,255,255,.1)!important}
 .details{display:none;margin-top:18px;padding:18px;border-radius:16px;background:rgba(255,255,255,.045);border:1px solid rgba(142,233,177,.14)}
 .row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px}.row:last-child{border-bottom:0}.row b{color:#8ee9b1}
-input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);background:#f7fbf8;color:#0b1710;padding:12px;border-radius:12px;margin-top:10px}
-.note{font-size:12px;color:rgba(247,251,248,.55);line-height:1.7;margin-top:14px}
+.note{font-size:12px;color:rgba(247,251,248,.7);line-height:1.8;margin-top:14px}
 </style></head>
 <body><main class="wrap"><section class="card">
 <div class="eyebrow">BPC CLOTHES SYSTEM · PAYMENT</div>
-<h1 id="title">أكمل دفع الاشتراك</h1><p id="copy" class="muted">جارٍ تحميل بيانات الباقة…</p>
+<h1 id="title">دفع الاشتراك</h1><p id="copy" class="muted">جارٍ تحميل بيانات الباقة…</p>
 <div id="price" class="price">—</div><div id="status" class="status">جاري التحقق من الاشتراك…</div>
 <div id="details" class="details"></div><div id="actions" class="actions"></div><div id="msg" class="note"></div>
 </section></main>
@@ -24,27 +23,25 @@ input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);ba
 const token=sessionStorage.getItem("bpc_signup_token");const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 const statusEl=document.querySelector("#status"),details=document.querySelector("#details"),actions=document.querySelector("#actions"),price=document.querySelector("#price"),copy=document.querySelector("#copy"),msg=document.querySelector("#msg");
 function showManual(s){
- const method=s.payment_method==="instapay"?"InstaPay":"Vodafone Cash", isI=s.payment_method==="instapay";
+ const isI=s.payment_method==="instapay";
  const p=s.plan||{}; price.textContent=Number(p.price||0).toLocaleString("ar-EG")+" جنيه";
  copy.innerHTML="الباقة: <b>"+esc(p.name||"")+"</b><br>المبلغ المطلوب: <b>"+Number(p.price||0).toLocaleString("ar-EG")+" جنيه مصري</b>";
- statusEl.textContent="في انتظار تأكيد الدفع — الحساب لن يتفعل قبل تأكيد التحويل.";
+ statusEl.textContent="بعد الدفع، برجاء التواصل مع الدعم لتأكيد الدفع وتفعيل الحساب.";
  details.style.display="block";details.innerHTML=isI?
  '<div class="row"><span>حساب InstaPay</span><b>'+esc(s.payment?.address||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>':
  '<div class="row"><span>Vodafone Cash</span><b>'+esc(s.payment?.number||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>';
  actions.innerHTML=isI
    ? '<a class="btn primary" id="pay" href="https://ipn.eg/S/mohame1131/instapay/4kO7KH" target="_blank" rel="noopener">الذهاب للدفع الآن ←</a><a class="btn secondary" href="/plans.html">تغيير الباقة</a>'
-   : '<button class="primary" id="pay" type="button">الذهاب للدفع الآن ←</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
+   : '<button class="primary" id="pay" type="button">الدفع عبر Vodafone Cash</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
  if(!isI){
-   document.querySelector("#pay").onclick=()=>{
-     msg.textContent="للدفع عبر Vodafone Cash، الرجاء التواصل مع الدعم لإتمام عملية الدفع وتفعيل الحساب.";
-   };
+   document.querySelector("#pay").onclick=()=>{msg.textContent="للدفع عبر Vodafone Cash، الرجاء التواصل مع الدعم لإتمام عملية الدفع وتفعيل الحساب."};
+ } else {
+   msg.textContent="بعد إتمام الدفع عبر InstaPay، برجاء التواصل مع الدعم لتأكيد الدفع وتفعيل الحساب.";
  }
- const form=document.createElement("form");form.innerHTML='<input name="reference" placeholder="رقم/مرجع عملية التحويل" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button class="primary" style="width:100%;margin-top:10px" type="submit">إرسال إثبات التحويل</button>';details.appendChild(form);
- form.onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(form).entries());const r=await fetch("/api/subscription/manual-transfer-reference",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({...b,payment_method:s.payment_method})});const d=await r.json().catch(()=>({}));msg.textContent=r.ok?"تم إرسال رقم العملية للمراجعة. بعد تأكيد الدفع سيتم تفعيل الحساب.":(d.error||"تعذر إرسال رقم العملية.");};
 }
 async function load(){
  if(!token){statusEl.textContent="جلسة الدفع غير موجودة. ارجع وسجل الحساب مرة أخرى.";return}
- const r=await fetch("/api/subscription/status",{headers:{Authorization:"Bearer "+token}}).catch(()=>null);const d=r?await r.json().catch(()=>({})):{};
+ const r=await fetch("/api/subscription/status",{headers:{Authorization:"Bearer "+token}}).catch(()=>null);const d=r?await r.json().catch(()=>({})):{}};
  if(!r?.ok){statusEl.textContent=d.error||"تعذر التحقق من الاشتراك.";return}
  const s=d.subscription;
  if(s?.active){statusEl.textContent="تم تفعيل الاشتراك ✓";setTimeout(()=>location.href="/app.html",700);return}
