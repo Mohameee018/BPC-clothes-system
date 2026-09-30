@@ -312,6 +312,7 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
   return r.status(502).json({error:"Could not start the secure payment checkout. Please try again."});
  }
  r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{id:pending.data.id,plan:plan.data},payment:{checkout_url:paymobCheckoutUrl(payment.clientSecret),reference:paymentRef}});
+});
 app.post("/api/payments/paymob/webhook",async(q,r)=>{
  const received=String(q.query?.hmac||"").trim(),obj=q.body?.obj;
  if(!paymobTxnHmacValid(obj,received))return r.status(200).json({ok:false});
