@@ -155,17 +155,85 @@ async function ensureCustomerForUser(user){
   return linked.data||null;
 }const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
-app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"signup"}),async(q,r)=>{
+function hashActivationCode(code){
+  return crypto.createHash("sha256").update(String(code||"").trim().toUpperCase()).digest("hex");
+}
+function makeActivationCode(){
+  return crypto.randomBytes(5).toString("hex").toUpperCase().match(/.{1,4}/g).join("-");
+}
+function addDays(date,days){return new Date(date.getTime()+Number(days)*86400000)}
+async function getSubscriptionForUser(userId){
+  if(!supabase||!userId)return null;
+  const now=new Date();
+  const q=await supabase.from("subscriptions")
+    .select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,plan_id,subscription_plans(code,name,duration_days,price)")
+    .eq("auth_user_id",userId)
+    .order("expires_at",{ascending:false})
+    .limit(1)
+    .maybeSingle();
+  if(q.error)return null;
+  const sub=q.data;
+  if(!sub)return null;
+  if(sub.expires_at && new Date(sub.expires_at)<=now && sub.status==="active"){
+    await supabase.from("subscriptions").update({status:"expired",updated_at:now.toISOString()}).eq("id",sub.id).eq("status","active");
+    sub.status="expired";
+  }
+  return sub;
+}
+function subscriptionView(sub){
+  if(!sub)return {status:"none",active:false,warning:false};
+  const expires=sub.expires_at?new Date(sub.expires_at):null;
+  const ms=expires?expires.getTime()-Date.now():0;
+  const daysLeft=expires?Math.ceil(ms/86400000):0;
+  const warning=sub.status==="active"&&daysLeft<=7;
+  return {
+    id:sub.id,status:sub.status,active:sub.status==="active"&&!!expires&&expires.getTime()>Date.now(),
+    warning,days_left:daysLeft,starts_at:sub.starts_at||null,expires_at:sub.expires_at||null,
+    plan:sub.subscription_plans||null
+  };
+}
+async function requireActiveSubscription(userId,res){
+  const sub=await getSubscriptionForUser(userId);
+  const view=subscriptionView(sub);
+  if(!view.active){
+    const message=view.status==="expired"?"Your subscription has expired. Renew to continue.":"A paid BPC subscription is required to access the system.";
+    return {ok:false,response:res.status(403).json({error:message,code:view.status==="expired"?"SUBSCRIPTION_EXPIRED":"SUBSCRIPTION_REQUIRED",subscription:view})};
+  }
+  return {ok:true,subscription:sub,view};
+}
+
+app.get("/api/subscription/plans",async(_q,r)=>{
+ if(!supabase)return r.status(503).json({error:"Subscription service is not configured."});
+ const p=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("active",true).order("duration_days");
+ if(p.error)return r.status(500).json({error:"Could not load subscription plans."});
+ r.json({plans:p.data||[]});
+});
+app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"subscription-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
- const email=String(q.body?.email||"").trim(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim();
- if(!email||password.length<6)return r.status(400).json({error:"Email and password are required; password must be at least 6 characters."});
+ const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),code=String(q.body?.activation_code||"").trim().toUpperCase();
+ if(!email||password.length<8||!name||!code)return r.status(400).json({error:"Name, email, password (8+ characters), and your paid activation code are required."});
+ const codeHash=hashActivationCode(code);
+ const pending=await supabase.from("subscriptions").select("id,brand_id,plan_id,status,activation_expires_at,subscription_plans(code,name,duration_days)").eq("activation_code_hash",codeHash).eq("status","pending").maybeSingle();
+ if(pending.error)return r.status(500).json({error:"Could not verify activation code."});
+ if(!pending.data)return r.status(403).json({error:"Invalid or already used activation code."});
+ if(pending.data.activation_expires_at&&new Date(pending.data.activation_expires_at)<=new Date())return r.status(403).json({error:"This activation code has expired. Contact support."});
  const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone}}});
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
- const profile=await supabase.from("profiles").update({brand_id:configuredBrandId(),role:"customer",name,phone}).eq("id",user.id);
- if(profile.error)return r.status(500).json({error:"Account created but brand assignment failed. Please contact support."});
- r.status(201).json({user:{id:user.id,email:user.email||null},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
+ const profile=await supabase.from("profiles").update({brand_id:pending.data.brand_id,role:"admin",name,phone}).eq("id",user.id);
+ if(profile.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to the paid subscription."});}
+ const now=new Date(),days=Number(pending.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ const claimed=await supabase.from("subscriptions").update({
+   auth_user_id:user.id,status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),
+   activation_code_hash:null,activation_expires_at:null,customer_name:name,customer_email:email,updated_at:now.toISOString()
+ }).eq("id",pending.data.id).eq("status","pending").select("id").maybeSingle();
+ if(claimed.error||!claimed.data){await supabase.auth.admin.deleteUser(user.id);return r.status(409).json({error:"Activation was already claimed. Please request a new code."});}
+ r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{plan:pending.data.subscription_plans,starts_at:now.toISOString(),expires_at:expires.toISOString()}});
+});
+app.get("/api/subscription/status",async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const sub=await getSubscriptionForUser(user.id);r.json({subscription:subscriptionView(sub)});
 });
 app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"desktop-login"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
@@ -174,10 +242,12 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  const signed=await authClient.auth.signInWithPassword({email,password});
  if(signed.error||!signed.data?.session)return r.status(401).json({error:"Invalid email or password."});
  const user=signed.data.user,profile=await getAuthProfile(user.id);
- if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a brand administrator."});}
+ if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a BPC company administrator."});}
  const brand=await supabase.from("brands").select("id,name,slug,active").eq("id",profile.brand_id).maybeSingle();
- if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This brand is inactive or unavailable."});}
- r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data});
+ if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This company is inactive or unavailable."});}
+ const gate=await requireActiveSubscription(user.id,r);
+ if(!gate.ok){await authClient.auth.signOut();return gate.response;}
+ r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data,subscription:gate.view});
 });
 async function requireSuperAdmin(req,res){
  const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
@@ -205,6 +275,56 @@ app.post("/api/admin/brands/account",async(q,r)=>{
  if(profile.error)return r.status(500).json({error:"Internal server error."});
  r.status(201).json({user_id:created.data.user.id,email,brand:brand.data});
 });
+app.get("/api/admin/subscriptions",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const subs=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,notes,created_at,last_renewed_at,subscription_plans(code,name,duration_days,price)").order("expires_at",{ascending:false}).limit(500);
+ if(subs.error)return r.status(500).json({error:"Could not load subscriptions."});
+ r.json(subs.data||[]);
+});
+app.post("/api/admin/subscriptions/create",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual"),amount=Number(q.body?.amount||0);
+ if(!email||!name)return r.status(400).json({error:"Customer name and email are required."});
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error||!plan.data)return r.status(400).json({error:"Invalid subscription plan."});
+ const brand=await supabase.from("brands").select("id,name,active").eq("id",brandId).maybeSingle();
+ if(brand.error||!brand.data?.active)return r.status(404).json({error:"Brand not found or inactive."});
+ const password=crypto.randomBytes(9).toString("base64url");
+ const created=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name}});
+ if(created.error)return r.status(409).json({error:created.error.message});
+ const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
+ if(profile.error){await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not assign the account to the company."});}
+ const now=new Date(),expires=addDays(now,Number(plan.data.duration_days));
+ const sub=await supabase.from("subscriptions").insert({brand_id:brandId,auth_user_id:created.data.user.id,plan_id:plan.data.id,status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),customer_name:name,customer_email:email,payment_method:paymentMethod,payment_reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null}).select("id").single();
+ if(sub.error){await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not create the subscription."});}
+ await supabase.from("subscription_payments").insert({subscription_id:sub.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+ r.status(201).json({account:{email,password,name},subscription:{id:sub.data.id,plan:plan.data,starts_at:now.toISOString(),expires_at:expires.toISOString()}});
+});
+app.post("/api/admin/subscriptions/activation",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),amount=Number(q.body?.amount||0);
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error||!plan.data||!email||!name)return r.status(400).json({error:"Valid name, email and plan are required."});
+ const code=makeActivationCode(),now=new Date(),activationExpires=addDays(now,7);
+ const ins=await supabase.from("subscriptions").insert({brand_id:brandId,plan_id:plan.data.id,status:"pending",activation_code_hash:hashActivationCode(code),activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,payment_method:"manual",payment_reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null}).select("id").single();
+ if(ins.error)return r.status(500).json({error:"Could not create activation."});
+ await supabase.from("subscription_payments").insert({subscription_id:ins.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:"manual",reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+ r.status(201).json({activation_code:code,expires_at:activationExpires.toISOString(),plan:plan.data,customer:{name,email}});
+});
+app.post("/api/admin/subscriptions/renew",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),amount=Number(q.body?.amount||0);
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,status,expires_at,plan_id,brand_id").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ const planQuery=planCode?await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle():await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("id",sub.data.plan_id).maybeSingle();
+ if(planQuery.error||!planQuery.data)return r.status(400).json({error:"Invalid renewal plan."});
+ const now=new Date(),base=sub.data.expires_at&&new Date(sub.data.expires_at)>now?new Date(sub.data.expires_at):now,expires=addDays(base,Number(planQuery.data.duration_days));
+ const up=await supabase.from("subscriptions").update({plan_id:planQuery.data.id,status:"active",starts_at:sub.data.status==="expired"?now.toISOString():sub.data.starts_at,expires_at:expires.toISOString(),updated_at:now.toISOString(),last_renewed_at:now.toISOString()}).eq("id",id).select("id,expires_at,status").single();
+ if(up.error)return r.status(500).json({error:"Could not renew subscription."});
+ await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(planQuery.data.price||0),payment_method:String(q.body?.payment_method||"manual"),reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+ r.json({ok:true,subscription:up.data,plan:planQuery.data});
+});
 app.get("/api/desktop/update",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Desktop login required."});
  const profile=await getAuthProfile(user.id);if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
@@ -231,7 +351,15 @@ app.get("/api/desktop/update",async(q,r)=>{
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
 app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:configuredBrandId()})});
-app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
+app.get("/api/auth/me",async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const profile=await getAuthProfile(user.id);
+ if(profile?.role==="admin"){
+   const gate=await requireActiveSubscription(user.id,r);if(!gate.ok)return gate.response;
+   return r.json({user:{id:user.id,email:user.email||null},profile,subscription:gate.view});
+ }
+ r.json({user:{id:user.id,email:user.email||null},profile,subscription:null});
+});
 
 async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return null;return {user,profile};}
 async function requireTenantAdmin(req,res){const user=await getAuthUser(req);if(!user)return res.status(401).json({error:"Sign in to continue."});const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return res.status(403).json({error:"Company administrator access required."});const brand=await supabase.from("brands").select("id,name,slug,active").eq("id",profile.brand_id).maybeSingle();if(brand.error)return res.status(503).json({error:"Could not verify company access."});if(!brand.data?.active)return res.status(403).json({error:"This company is inactive."});req.tenant={user,profile,brand:brand.data,brandId:String(profile.brand_id)};return null;}
@@ -295,7 +423,8 @@ async function requireSystemAdmin(q,r){
   const user=await getAuthUser(q); if(!user)return {ok:false,response:r.status(401).json({error:"Not authenticated."})};
   const profile=await getAuthProfile(user.id);
   if(profile?.role!=="admin"||!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return {ok:false,response:r.status(403).json({error:"BPC administrator access required."})};
-  q.systemUser=user;q.brandId=String(profile.brand_id);return {ok:true,user,profile};
+  const sub=await requireActiveSubscription(user.id,r);if(!sub.ok)return sub;
+  q.systemUser=user;q.brandId=String(profile.brand_id);q.subscription=sub.view;return {ok:true,user,profile,subscription:sub.view};
 }
 function systemColumns(table,obj){const allowed=new Set(SYSTEM_TABLES[table]||[]);const out={};for(const [k,v] of Object.entries(obj||{}))if(allowed.has(k)&&k!=="id"&&k!=="brand_id"&&k!=="created_at"&&k!=="updated_at")out[k]=v;return out}
 app.get("/api/system/summary",async(q,r)=>{
