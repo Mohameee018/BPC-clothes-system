@@ -599,6 +599,8 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
  const stockReservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
  const authUser=await getAuthUser(q);let customerId=null;
  if(authUser){
+   const accountProfile=await getAuthProfile(authUser.id);
+   if(!accountProfile?.brand_id||String(accountProfile.brand_id)!==brandId)return r.status(403).json({error:"This account belongs to a different brand. Sign out to place an order as a guest."});
    try{
      const accountCustomer=await ensureCustomerForUser(authUser);
      if(!accountCustomer?.id)return r.status(403).json({error:"This account is not assigned to a customer record."});
