@@ -23,10 +23,10 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
 .plans-hero p{color:rgba(247,251,248,.68);font-size:16px;line-height:1.7;max-width:650px;margin:0}
 .plans-promise{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
 .plans-promise span{padding:9px 13px;border:1px solid rgba(142,233,177,.18);background:rgba(255,255,255,.045);border-radius:999px;font-size:12px;color:rgba(247,251,248,.8);backdrop-filter:blur(12px)}
-.plans-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.plans-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:stretch}
 .plan-card{position:relative;padding:28px;border-radius:24px;border:1px solid rgba(190,255,214,.16);background:rgba(8,43,25,.64);backdrop-filter:blur(22px);min-height:360px;display:flex;flex-direction:column}
 .plan-card.featured{border-color:rgba(142,233,177,.6);background:linear-gradient(145deg,rgba(57,201,121,.14),rgba(8,43,25,.72))}
-.plan-card.featured:before{content:"الأكثر مرونة";position:absolute;top:18px;left:18px;background:#8ee9b1;color:#062617;padding:6px 10px;border-radius:999px;font-size:10px;font-weight:700}
+.plan-card.featured:before{content:"أفضل قيمة";position:absolute;top:18px;left:18px;background:#8ee9b1;color:#062617;padding:6px 10px;border-radius:999px;font-size:10px;font-weight:700}
 .plan-index{font-size:11px;color:rgba(247,251,248,.42);letter-spacing:.15em}
 .plan-card h2{font-size:28px;letter-spacing:-.04em;margin:24px 0 8px}
 .plan-duration{color:#8ee9b1;font-size:13px;margin:0 0 18px}
@@ -63,8 +63,28 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
     </div>
   </section>
 
-  <section id="plans" class="plans-grid" aria-live="polite">
-    <article class="plan-card"><span>...</span><h2>جارٍ تحميل الباقات</h2></article>
+  <section id="plans" class="plans-grid" aria-label="باقات الاشتراك">
+    <article class="plan-card">
+      <span class="plan-index">01 / MONTHLY</span><h2>الباقة الشهرية</h2><p class="plan-duration">لمدة 30 يوم</p>
+      <p class="plan-price">$25 <small>USD / شهر</small></p>
+      <p class="plan-copy">كل الأدوات الأساسية لإدارة منتجاتك ومخزونك وطلباتك من مكان واحد.</p>
+      <a class="plan-btn" href="/signup.html?plan=monthly">اختار الباقة الشهرية ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">ابدأ بتنظيم شغل البراند من غير التزام طويل.</p>
+    </article>
+    <article class="plan-card">
+      <span class="plan-index">02 / 3 MONTHS</span><h2>باقة 3 شهور</h2><p class="plan-duration">لمدة 90 يوم</p>
+      <p class="plan-price">$50 <small>USD / 3 شهور</small></p>
+      <p class="plan-copy">استخدم السيستم لثلاث شهور بسعر إجمالي أقل من الاشتراك الشهري المتكرر.</p>
+      <a class="plan-btn" href="/signup.html?plan=quarterly">اختار باقة 3 شهور ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">مساحة أكبر لتجربة النظام وبناء روتين ثابت لإدارة الطلبات.</p>
+    </article>
+    <article class="plan-card featured">
+      <span class="plan-index">03 / YEARLY</span><h2>الباقة السنوية</h2><p class="plan-duration">لمدة سنة كاملة · 365 يوم</p>
+      <p class="plan-price">$225 <small>USD / سنة</small></p>
+      <p class="plan-copy">إدارة مستمرة طول السنة بسعر إجمالي أوفر من التجديدات الشهرية.</p>
+      <a class="plan-btn" href="/signup.html?plan=yearly">اختار الباقة السنوية ←</a>
+      <p class="plan-copy" style="margin:16px 0 0;font-size:12px">اختيار مناسب لو عايز تركز على نمو البراند بدل متابعة مواعيد التجديد.</p>
+    </article>
   </section>
 
   <section class="plans-support">
@@ -83,23 +103,10 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
 </main>
 <script>
 (async()=>{
-  const esc=v=>String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
   const cfg=await fetch("/api/public-config").then(r=>r.ok?r.json():{}).catch(()=>({}));
   const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"")||"201080910753";
-  document.querySelector("#support").href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System");
-  const r=await fetch("/api/subscription/plans").catch(()=>null);
-  const d=r?await r.json().catch(()=>({})):({});
-  const plans=Array.isArray(d.plans)?d.plans:[];
-  const labels={monthly:"شهري",quarterly:"3 شهور",yearly:"سنوي"};
-  document.querySelector("#plans").innerHTML=r&&r.ok&&plans.length?plans.map((p,i)=>{
-    const code=String(p.code||"").toLowerCase();
-    const label=labels[code]||String(p.name||"باقة");
-    const duration=Number(p.duration_days||0);
-    const durationText=duration===30?"30 يوم":duration===90?"90 يوم":duration===365?"365 يوم":duration+" يوم";
-    const copy=duration===365?"اختيار مناسب لو عايز تركز على شغلك وتقلل التجديدات.":duration===90?"مدة متوازنة لو عايز مساحة أكبر للتجربة والتشغيل.":"ابدأ بخطوة بسيطة واختبر النظام على شغلك بدون التزام طويل.";
-    return '<article class="plan-card '+(duration===90?"featured":"")+'"><span class="plan-index">0'+(i+1)+'</span><h2>'+esc(label)+'</h2><p class="plan-duration">'+durationText+'</p><p class="plan-price">'+Number(p.price||0).toLocaleString("ar-EG")+' <small>EGP</small></p><p class="plan-copy">'+copy+'</p><a class="plan-btn" href="/signup.html?plan='+encodeURIComponent(p.code||"")+'">ابدأ الاشتراك ←</a></article>';
-  }).join(""):'<article class="plan-card" style="grid-column:1/-1"><h2>تعذر تحميل الباقات</h2><p class="plan-copy">حاول مرة أخرى أو تواصل مع الدعم.</p></article>';
-})().catch(()=>{document.querySelector("#plans").innerHTML='<article class="plan-card" style="grid-column:1/-1"><h2>تعذر تحميل الباقات</h2><p class="plan-copy">حاول مرة أخرى أو تواصل مع الدعم.</p></article>'});
+  document.querySelector("#support").href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System وأحتاج تأكيد طريقة الدفع وتفعيل الباقة.");
+})();
 </script>
 </body>
 </html>
