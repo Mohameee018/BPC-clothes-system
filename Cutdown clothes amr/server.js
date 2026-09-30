@@ -413,6 +413,26 @@ app.get("/api/admin/orders",async(q,r)=>{
  const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).limit(500);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
 });
+app.post("/api/app/orders/return",async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const {order_id,reason,disposition,amount,loss}=q.body||{};
+ if(!order_id)return r.status(400).json({error:"Missing order_id."});
+ const owned=await supabase.from("orders").select("id").eq("id",order_id).eq("brand_id",q.tenant.brandId).eq("source","website").maybeSingle();
+ if(owned.error)return r.status(500).json({error:"Could not verify order ownership."});
+ if(!owned.data)return r.status(404).json({error:"Website order not found."});
+ const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:String(disposition||"Return to Stock"),p_refund_amount:Number(amount||0),p_loss:Number(loss||0)});
+ if(result.error){
+  const msg=String(result.error.message||"");
+  if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
+  if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."});
+  if(msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Invalid refund amount."});
+  if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
+  if(msg.includes("ORDER_NOT_CONFIRMED"))return r.status(409).json({error:"Order is not confirmed for return."});
+  if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
+  return r.status(500).json({error:"Could not process return."});
+ }
+ r.json({ok:true,processed:result.data===true});
+});
 app.post("/api/admin/orders/status",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
