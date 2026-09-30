@@ -291,9 +291,22 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
    brand_id:brandId,auth_user_id:user.id,plan_id:plan.data.id,status:"pending",
    starts_at:null,expires_at:null,activation_code_hash:hashActivationCode(paymentRef),
    activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,
-   payment_method:"paymob",updated_at:now.toISOString()
+   payment_method:"manual",updated_at:now.toISOString()
  }).select("id").single();
- if(pending.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Could not create the pending subscription."});}
+ if(pending.error){
+  console.error("SUBSCRIPTION_PENDING_INSERT_FAILED",{
+    code:pending.error.code,
+    message:pending.error.message,
+    details:pending.error.details,
+    hint:pending.error.hint,
+    userId:user.id,
+    planId:plan.data.id,
+    brandId,
+  });
+  await supabase.from("brands").delete().eq("id",brandId);
+  await supabase.auth.admin.deleteUser(user.id);
+  return r.status(500).json({error:"Could not create the pending subscription."});
+}
   const requestedMethod=String(q.body?.payment_method||"paymob").trim().toLowerCase();
  if(requestedMethod==="instapay"||requestedMethod==="vodafone_cash"){
   const manual=await getPlatformPaymentSettings();
