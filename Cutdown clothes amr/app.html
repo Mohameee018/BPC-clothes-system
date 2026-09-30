@@ -140,11 +140,11 @@ async function settings(c){
  $("#saveSettings").onclick=async()=>{
   const settings={storeName:$("#sn").value.trim(),storeMode:$("#sm").value,storePhone:$("#sp").value.trim(),storeAddress:$("#sa").value.trim(),logoUrl:$("#sl").value.trim(),websiteUrl:$("#extUrl").value.trim(),primaryColor:$("#pc1").value,backgroundColor:$("#bg1").value,heroEyebrow:$("#he").value.trim(),heroTitle:$("#ht").value.trim(),heroSubtitle:$("#hs").value.trim(),storyTitle:$("#storyTitle").value.trim(),storyText:$("#storyText").value.trim(),instagramUrl:$("#ig").value.trim(),facebookUrl:$("#fb").value.trim(),whatsappUrl:$("#wa").value.trim(),tiktokUrl:$("#tt").value.trim()};
   try{
-   await api("/api/app/settings",{method:"PATCH",body:JSON.stringify({settings})});
+   const saved=await api("/api/app/settings",{method:"PATCH",body:JSON.stringify({settings})});
    const upload=async(id,kind)=>{const f=$(id).files?.[0];if(!f)return;const data=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(String(rd.result).split(",")[1]||"");rd.onerror=rej;rd.readAsDataURL(f)});const d=await api("/api/app/store-asset",{method:"POST",body:JSON.stringify({kind,data_base64:data})});if(kind==="logo")settings.logoUrl=d.url;else settings.heroImageUrl=d.url};
    await upload("#logoFile","logo");await upload("#heroFile","hero");
    alert("Store settings saved. افتح المتجر لمشاهدة التغييرات.");
-   const ss=await api("/api/app/settings"); tenantBrand={...(tenantBrand||{}),settings:ss.settings||settings,website_url:settings.storeMode==="external"?settings.websiteUrl:null}; syncStorefrontLink();
+   const ss=saved||await api("/api/app/settings"); tenantBrand={...(tenantBrand||{}),settings:ss.settings||settings,website_url:ss.website_url||null}; syncStorefrontLink();
   }catch(e){alert(e.message)}
  };
 }
