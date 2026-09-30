@@ -385,7 +385,13 @@ app.post("/api/subscription/manual-transfer-reference",rateLimit({windowMs:10*60
 });
 app.get("/api/subscription/status",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
- const sub=await getSubscriptionForUser(user.id);r.json({subscription:subscriptionView(sub)});
+ const sub=await getSubscriptionForUser(user.id);const view=subscriptionView(sub);
+ if(view.status==="pending"&&(sub?.payment_method==="instapay"||sub?.payment_method==="vodafone_cash")){
+  const payment=await getPlatformPaymentSettings();
+  view.payment_method=sub.payment_method;
+  view.payment=sub.payment_method==="instapay"?{address:payment.instapayAddress,name:payment.instapayName,bank:payment.instapayBank,account:payment.instapayAccount}:{number:payment.vodafoneCashNumber,name:payment.vodafoneCashName};
+ }
+ r.json({subscription:view});
 });
 app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"desktop-login"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
