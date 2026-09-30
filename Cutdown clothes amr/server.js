@@ -73,7 +73,7 @@ app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPref
       const bytes=Buffer.from(String(img.data_base64),"base64");if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
       const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Unsupported product image type."});
       const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
-      const path="desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
+      const path="brands/"+safeFileName(q.brandId)+"/desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
       const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:true});
       if(upImg.error)return r.status(500).json({error:"Internal server error."});
       const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
