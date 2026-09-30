@@ -35,7 +35,7 @@ async function resolvePublicBrand(req){
  }
  const host=String(req.headers?.host||"").split(":")[0].toLowerCase();
  const baseHost=(()=>{try{return new URL(process.env.PUBLIC_BASE_URL||"").hostname.toLowerCase()}catch{return ""}})();
- if(host&&baseHost&&host!==baseHost){
+ if(host&&(!baseHost||host!==baseHost)){
   const brands=await supabase.from("brands").select("id,name,slug,active,website_url").eq("active",true).not("website_url","is",null).limit(500);
   if(brands.error)throw brands.error;
   const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});
