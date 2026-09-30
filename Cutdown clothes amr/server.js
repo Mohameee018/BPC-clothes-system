@@ -426,14 +426,14 @@ app.post("/api/admin/orders/status",async(q,r)=>{
 /* BPC system API — tenant-scoped management surface. */
 app.use("/api/system",rateLimit({windowMs:60*1000,max:120,keyPrefix:"system-api"}));
 const SYSTEM_TABLES={
-  products:["id","desktop_id","sku","name","category","description","image_path","price","cost_price","stock","minimum_stock","active","is_active","created_at","updated_at"],
+  products:["id","desktop_id","sku","name","slug","category","description","image_url","price","cost_price","stock","minimum_stock","active","is_active","created_at","updated_at"],
   product_variants:["id","product_id","desktop_variant_id","sku","size","color","stock","active","created_at","updated_at"],
   warehouses:["id","desktop_id","name","location","active","created_at","updated_at"],
-  inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at","created_at"],
-  customers:["id","desktop_id","name","phone","email","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
-  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","delivery_status","total_amount","discount","shipping_cost","created_at","updated_at"],
-  order_items:["id","order_id","product_id","variant_id","product_name","sku","category","size","color","quantity","unit_price","cost_price","line_total","created_at"],
-  returns:["id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss_amount","status","created_at"],
+  inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at"],
+  customers:["id","auth_user_id","desktop_id","name","email","phone","additional_phone","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
+  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","total_amount","source","shipping_amount","stock_reserved","created_at","updated_at"],
+  order_items:["id","order_id","product_id","product_name","quantity","unit_price","size","color","variant_id","desktop_id","brand_id"],
+  returns:["id","desktop_id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss","created_at","processed_at","notes"],
   expenses:["id","desktop_id","amount","category","description","payment_method","status","expense_date","created_at","updated_at"]
 };
 const SYSTEM_WRITE_TABLES=new Set(["products","product_variants","warehouses","inventory","customers","expenses"]);
@@ -448,8 +448,12 @@ async function requireSystemAdmin(q,r){
 function systemColumns(table,obj){const allowed=new Set(SYSTEM_TABLES[table]||[]);const out={};for(const [k,v] of Object.entries(obj||{}))if(allowed.has(k)&&k!=="id"&&k!=="brand_id"&&k!=="created_at"&&k!=="updated_at")out[k]=v;return out}
 app.get("/api/system/summary",async(q,r)=>{
   const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
-  const counts={};for(const table of ["products","product_variants","warehouses","inventory","customers","orders","returns","expenses"]){const x=await supabase.from(table).select("id",{count:"exact",head:true}).eq("brand_id",q.brandId);if(x.error)return r.status(500).json({error:"Could not load system summary."});counts[table]=x.count||0}
-  const revenue=await supabase.from("orders").select("total_amount").eq("brand_id",q.brandId).neq("order_status","cancelled");if(revenue.error)return r.status(500).json({error:"Could not load system summary."});
+  const tables=["products","product_variants","warehouses","inventory","customers","orders","returns","expenses"];
+  const results=await Promise.all(tables.map(table=>supabase.from(table).select("id",{count:"exact",head:true}).eq("brand_id",q.brandId)));
+  const bad=results.find(x=>x.error);if(bad)return r.status(500).json({error:"Could not load system summary."});
+  const counts={};tables.forEach((table,i)=>{counts[table]=results[i].count||0});
+  const revenue=await supabase.from("orders").select("total_amount").eq("brand_id",q.brandId).neq("order_status","cancelled");
+  if(revenue.error)return r.status(500).json({error:"Could not load system summary."});
   r.json({counts,revenue:(revenue.data||[]).reduce((n,x)=>n+Number(x.total_amount||0),0)});
 });
 app.get("/api/system/:table",async(q,r)=>{
@@ -457,14 +461,22 @@ app.get("/api/system/:table",async(q,r)=>{
   const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
   const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).limit(limit);
   const search=String(q.query.search||"").trim();if(search&&["products","customers","warehouses","expenses"].includes(table)){const field=table==="products"?"name":table==="customers"?"name":table==="warehouses"?"name":"description";query=query.ilike(field,"%"+search.replace(/[%_]/g,"") +"%")}
-  query=query.order("created_at",{ascending:false});
+  query=query.order(table==="inventory"?"updated_at":"created_at",{ascending:false});
   const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});r.json(result.data||[]);
 });
 app.post("/api/system/:table",async(q,r)=>{
   const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
   const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
   const row=systemColumns(table,q.body);row.brand_id=q.brandId;
-  if(table==="products"){if(!String(row.name||"").trim())return r.status(400).json({error:"Product name is required."});row.name=String(row.name).trim();row.price=Number(row.price||0);row.cost_price=Number(row.cost_price||0);row.stock=Number.isSafeInteger(Number(row.stock))?Number(row.stock):0;row.minimum_stock=Number.isSafeInteger(Number(row.minimum_stock))?Number(row.minimum_stock):0;row.active=row.active!==false;row.is_active=row.active}
+  if(table==="products"){
+    if(!String(row.name||"").trim())return r.status(400).json({error:"Product name is required."});
+    row.name=String(row.name).trim();
+    row.slug=String(row.slug||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,90)||("product-"+Date.now());
+    row.price=Number(row.price||0);row.cost_price=Number(row.cost_price||0);
+    row.stock=Number.isSafeInteger(Number(row.stock))?Number(row.stock):0;
+    row.minimum_stock=Number.isSafeInteger(Number(row.minimum_stock))?Number(row.minimum_stock):0;
+    row.active=row.active!==false;row.is_active=row.active;
+  }
   if(table==="warehouses"&&!String(row.name||"").trim())return r.status(400).json({error:"Warehouse name is required."});
   if(table==="customers"&&!String(row.name||"").trim())return r.status(400).json({error:"Customer name is required."});
   const ins=await supabase.from(table).insert(row).select(SYSTEM_TABLES[table].join(",")).single();if(ins.error)return r.status(400).json({error:"Could not create "+table+" record.",detail:ins.error.message});if(table==="products"){let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();if(wh.error)return r.status(500).json({error:"Product created but warehouse lookup failed."});if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Product created but main warehouse could not be created."});wh={data:nw.data}}const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});if(inv.error)return r.status(500).json({error:"Product created but inventory could not be initialized."});}r.status(201).json(ins.data);
