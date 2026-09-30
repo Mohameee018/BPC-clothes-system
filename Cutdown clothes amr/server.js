@@ -230,28 +230,95 @@ app.get("/api/subscription/plans",async(_q,r)=>{
  if(p.error)return r.status(500).json({error:"Could not load subscription plans."});
  r.json({plans:p.data||[]});
 });
+async function createPaymobIntention({amountCents,email,name,phone,planName,paymentRef}){
+ const secret=String(process.env.PAYMOB_SECRET_KEY||"").trim();
+ const publicKey=String(process.env.PAYMOB_PUBLIC_KEY||"").trim();
+ const methods=String(process.env.PAYMOB_PAYMENT_METHODS||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>/^\\d+$/.test(x)?Number(x):x);
+ if(!secret||!publicKey||!methods.length)throw new Error("PAYMOB_NOT_CONFIGURED");
+ const baseUrl=String(process.env.PUBLIC_BASE_URL||"").replace(/\\/$/,"");
+ if(!baseUrl)throw new Error("PUBLIC_BASE_URL_NOT_CONFIGURED");
+ const response=await fetch(paymobBase+"/v1/intention/",{
+  method:"POST",
+  headers:{"Authorization":"Token "+secret,"Content-Type":"application/json"},
+  body:JSON.stringify({
+   amount:Number(amountCents),currency:"EGP",payment_methods:methods,
+   items:[{name:planName,amount:Number(amountCents),description:"BPC Clothes System subscription",quantity:1}],
+   billing_data:{first_name:String(name||"Customer").split(/\\s+/)[0]||"Customer",last_name:String(name||"Customer").split(/\\s+/).slice(1).join(" ")||"Customer",phone_number:String(phone||"0000000000"),email,apartment:"NA",floor:"NA",street:"NA",building:"NA",city:"Cairo",state:"Cairo",country:"EG"},
+   special_reference:paymentRef,expiration:3600,
+   notification_url:baseUrl+"/api/payments/paymob/webhook",
+   redirection_url:baseUrl+"/payment-result.html"
+  })
+ });
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok||!data?.client_secret)throw new Error("PAYMOB_INTENTION_FAILED");
+ return {clientSecret:String(data.client_secret),intentionId:String(data.id||""),orderId:String(data.intention_order_id||"")};
+}
+function paymobCheckoutUrl(clientSecret){
+ const publicKey=String(process.env.PAYMOB_PUBLIC_KEY||"").trim();
+ return paymobBase+"/unifiedcheckout/?publicKey="+encodeURIComponent(publicKey)+"&clientSecret="+encodeURIComponent(clientSecret);
+}
+function paymobTxnHmacValid(obj,received){
+ const secret=String(process.env.PAYMOB_HMAC_SECRET||"").trim();
+ if(!secret||!received||!obj)return false;
+ const source=obj.source_data||{},order=obj.order||{};
+ const values=[obj.amount_cents,obj.created_at,obj.currency,obj.error_occured,obj.has_parent_transaction,obj.id,obj.integration_id,obj.is_3d_secure,obj.is_auth,obj.is_capture,obj.is_refunded,obj.is_standalone_payment,obj.is_voided,order.id,obj.owner,obj.pending,source.pan,source.sub_type,source.type,obj.success].map(v=>v===true?"true":v===false?"false":String(v??""));
+ const expected=crypto.createHmac("sha512",secret).update(values.join("")).digest("hex");
+ return crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(String(received)));
+}
 app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"subscription-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
- const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),code=String(q.body?.activation_code||"").trim().toUpperCase();
- if(!email||password.length<8||!name||!code)return r.status(400).json({error:"Name, email, password (8+ characters), and your paid activation code are required."});
- const codeHash=hashActivationCode(code);
- const pending=await supabase.from("subscriptions").select("id,brand_id,plan_id,status,activation_expires_at,subscription_plans(code,name,duration_days)").eq("activation_code_hash",codeHash).eq("status","pending").maybeSingle();
- if(pending.error)return r.status(500).json({error:"Could not verify activation code."});
- if(!pending.data)return r.status(403).json({error:"Invalid or already used activation code."});
- if(pending.data.activation_expires_at&&new Date(pending.data.activation_expires_at)<=new Date())return r.status(403).json({error:"This activation code has expired. Contact support."});
+ const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),planCode=String(q.body?.plan||"").trim().toLowerCase();
+ if(!email||password.length<8||!name||!planCode)return r.status(400).json({error:"Name, email, password (8+ characters), and a subscription plan are required."});
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error)return r.status(500).json({error:"Could not load the selected plan."});
+ if(!plan.data)return r.status(400).json({error:"The selected subscription plan is unavailable."});
+ const price=Number(plan.data.price||0);
+ if(!Number.isFinite(price)||price<=0)return r.status(400).json({error:"The selected plan has an invalid price."});
  const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone}}});
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
- const profile=await supabase.from("profiles").update({brand_id:pending.data.brand_id,role:"admin",name,phone}).eq("id",user.id);
- if(profile.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to the paid subscription."});}
- const now=new Date(),days=Number(pending.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
- const claimed=await supabase.from("subscriptions").update({
-   auth_user_id:user.id,status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),
-   activation_code_hash:null,activation_expires_at:null,customer_name:name,customer_email:email,updated_at:now.toISOString()
- }).eq("id",pending.data.id).eq("status","pending").select("id").maybeSingle();
- if(claimed.error||!claimed.data){await supabase.auth.admin.deleteUser(user.id);return r.status(409).json({error:"Activation was already claimed. Please request a new code."});}
- r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{plan:pending.data.subscription_plans,starts_at:now.toISOString(),expires_at:expires.toISOString()}});
+ const profile=await supabase.from("profiles").update({brand_id:configuredBrandId(),role:"admin",name,phone}).eq("id",user.id);
+ if(profile.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to BPC."});}
+ const paymentRef="BPC-"+crypto.randomBytes(12).toString("hex");
+ const now=new Date(),activationExpires=addDays(now,1/24);
+ const pending=await supabase.from("subscriptions").insert({
+   brand_id:configuredBrandId(),auth_user_id:user.id,plan_id:plan.data.id,status:"pending",
+   starts_at:null,expires_at:null,activation_code_hash:hashActivationCode(paymentRef),
+   activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,
+   payment_method:"paymob",updated_at:now.toISOString()
+ }).select("id").single();
+ if(pending.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Could not create the pending subscription."});}
+ let payment;
+ try{payment=await createPaymobIntention({amountCents:Math.round(price*100),email,name,phone,planName:plan.data.name,paymentRef});}
+ catch(error){
+  await supabase.from("subscriptions").delete().eq("id",pending.data.id);
+  await supabase.auth.admin.deleteUser(user.id);
+  const msg=String(error?.message||"");
+  if(msg==="PAYMOB_NOT_CONFIGURED"||msg==="PUBLIC_BASE_URL_NOT_CONFIGURED")return r.status(503).json({error:"Online payment is not configured yet. Please contact support for manual payment."});
+  return r.status(502).json({error:"Could not start the secure payment checkout. Please try again."});
+ }
+ r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{id:pending.data.id,plan:plan.data},payment:{checkout_url:paymobCheckoutUrl(payment.clientSecret),reference:paymentRef}});
+});
+app.post("/api/payments/paymob/webhook",async(q,r)=>{
+ const received=String(q.query?.hmac||"").trim(),obj=q.body?.obj;
+ if(!paymobTxnHmacValid(obj,received))return r.status(200).json({ok:false});
+ const order=obj?.order||{},reference=String(order?.merchant_order_id||"").trim();
+ if(!reference)return r.status(200).json({ok:true});
+ const sub=await supabase.from("subscriptions").select("id,auth_user_id,plan_id,status,activation_code_hash,subscription_plans(code,duration_days,price)").eq("activation_code_hash",hashActivationCode(reference)).eq("status","pending").maybeSingle();
+ if(sub.error||!sub.data)return r.status(200).json({ok:true});
+ const expectedCents=Math.round(Number(sub.data.subscription_plans?.price||0)*100);
+ const paidCents=Number(obj.amount_cents||0);
+ if(!obj.success||obj.error_occured||obj.is_refunded||paidCents!==expectedCents){
+  await supabase.from("subscriptions").update({status:"failed",updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending");
+  return r.status(200).json({ok:true});
+ }
+ const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ await supabase.from("subscriptions").update({
+  status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),
+  activation_code_hash:null,activation_expires_at:null,payment_method:"paymob",updated_at:now.toISOString()
+ }).eq("id",sub.data.id).eq("status","pending");
+ r.status(200).json({ok:true});
 });
 app.get("/api/subscription/status",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
