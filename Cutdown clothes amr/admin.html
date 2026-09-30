@@ -1,28 +1,92 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cutdown — Admin</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px"><section class="checkout-card glass" style="max-width:1100px;width:100%;margin:auto"><p class="eyebrow">CUTDOWN ADMIN</p><h1>Orders.</h1><p id="info">Checking access…</p><div style="display:flex;gap:12px;flex-wrap:wrap;margin:18px 0"><a class="btn" href="/">Back to store <span>↗</span></a><button class="btn" id="logout">Sign out <span>→</span></button></div><div id="orders">Loading orders…</div></section><section id="subscriptionAdmin" class="checkout-card glass" style="max-width:1100px;width:100%;margin:24px auto;padding:22px"><p class="eyebrow">SUBSCRIPTIONS</p><h2>Pending InstaPay Payments</h2><p style="opacity:.65">مراجعة التحويلات اليدوية وتفعيل الحساب بعد التأكد من وصول المبلغ.</p><div id="subscriptionList">Loading…</div></section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script><script>
-(async()=>{const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));const cfg=await fetch("/api/public-config").then(r=>r.json());if(!cfg.supabaseUrl||!cfg.supabaseKey){document.querySelector("#info").textContent="Supabase Auth is not configured.";return}const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey);const s=(await sb.auth.getSession()).data.session;if(!s){location.href="/";return}const h={Authorization:"Bearer "+s.access_token};const ping=await fetch("/api/admin/ping",{headers:h});if(!ping.ok){document.querySelector("#info").textContent="Access denied.";document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();location.href="/";};return}document.querySelector("#info").textContent="Admin access confirmed.";const load=async()=>{const r=await fetch("/api/admin/orders",{headers:h});const data=await r.json();if(!r.ok){document.querySelector("#orders").textContent=data.error||"Failed to load orders.";return}document.querySelector("#orders").innerHTML=data.length?data.map(o=>'<article style="border:1px solid rgba(255,255,255,.12);padding:18px;margin:12px 0;border-radius:14px"><strong>'+esc(o.id)+'</strong><p>'+esc(o.customer_name||"")+" · "+esc(o.customer_phone||"")+" · "+esc(o.total_amount||0)+" EGP</p><p>"+esc(o.order_status||"")+" · "+esc(o.delivery_status||"")+" · "+esc(o.payment_status||"")+'</p><select data-id="'+String(o.id)+'" class="status"><option value="Pending">Pending</option><option value="With Shipping Company">With Shipping Company</option><option value="Out for Delivery">Out for Delivery</option><option value="Delivered">Delivered</option><option value="Returned">Returned</option></select></article>').join(""):"No website orders yet.";data.forEach(o=>{const x=document.querySelector('.status[data-id="'+o.id+'"]');if(x)x.value=o.delivery_status||"Pending";});document.querySelectorAll(".status").forEach(x=>x.onchange=async()=>{const rr=await fetch("/api/admin/orders/status",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({order_id:x.dataset.id,delivery_status:x.value})});if(!rr.ok)alert("Could not update order.");});};await load();document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();location.href="/";};})();
-</script><script>
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BPC — Admin Login</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px;display:flex;align-items:center;justify-content:center">
+<section id="adminLogin" class="checkout-card glass" style="max-width:520px;width:100%">
+<p class="eyebrow">BPC ADMIN</p><h1 style="font-size:52px;font-weight:400;margin:0 0 16px">Admin Login</h1>
+<p style="color:#999;line-height:1.7">تسجيل الدخول هنا خاص بلوحة الإدارة. لن يتم تحويلك للمتجر بعد تسجيل الدخول.</p>
+<form id="adminLoginForm" style="display:grid;gap:12px;margin-top:24px">
+<input id="adminEmail" type="email" placeholder="Email" autocomplete="username" required>
+<input id="adminPassword" type="password" placeholder="Password" autocomplete="current-password" required>
+<button class="btn full" type="submit">دخول لوحة الـAdmin <span>→</span></button>
+</form><p id="loginMsg" style="min-height:24px;color:#aaa"></p>
+</section>
+<section id="adminShell" style="display:none;width:100%">
+<section class="checkout-card glass" style="max-width:1100px;width:100%;margin:auto">
+<p class="eyebrow">CUTDOWN ADMIN</p><h1>Orders.</h1><p id="info">Checking access…</p>
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin:18px 0"><button class="btn" id="logout">Sign out <span>→</span></button></div>
+<div id="orders">Loading orders…</div></section>
+<section id="subscriptionAdmin" class="checkout-card glass" style="max-width:1100px;width:100%;margin:24px auto;padding:22px">
+<p class="eyebrow">SUBSCRIPTIONS</p><h2>Pending InstaPay Payments</h2><p style="opacity:.65">مراجعة التحويلات اليدوية وتفعيل الحساب بعد التأكد من وصول المبلغ.</p><div id="subscriptionList">Loading…</div></section>
+</section></main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
+<script>
 (async()=>{
- const cfg=await fetch("/api/public-config").then(r=>r.json()).catch(()=>({}));
- if(!cfg.supabaseUrl||!cfg.supabaseKey)return;
- const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey),session=(await sb.auth.getSession()).data.session;
- if(!session)return;
  const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
- const box=document.querySelector("#subscriptionList");
- const load=async()=>{
-  const r=await fetch("/api/admin/subscriptions",{headers:{Authorization:"Bearer "+session.access_token}});
-  const data=await r.json().catch(()=>[]);
-  if(!r.ok){box.textContent="Subscription admin access unavailable.";return}
-  const pending=(data||[]).filter(x=>x.status==="pending"&&x.payment_method==="instapay");
-  box.innerHTML=pending.length?pending.map(x=>'<article style="border:1px solid rgba(255,255,255,.12);padding:16px;margin:12px 0;border-radius:14px"><strong>'+esc(x.customer_name||"")+'</strong><p>'+esc(x.customer_email||"")+' · '+esc(x.subscription_plans?.name||"")+' · '+esc(x.subscription_plans?.price||0)+' USD</p><p>InstaPay ref: <b>'+esc(x.payment_reference||"لم يُرسل بعد")+'</b></p><p style="opacity:.55;font-size:12px">'+esc(x.id)+'</p><button class="btn approve-sub" data-id="'+esc(x.id)+'" data-ref="'+esc(x.payment_reference||"")+'" '+(x.payment_reference?"":"disabled")+'>تأكيد التحويل وتفعيل الحساب</button></article>').join(""):"لا توجد تحويلات InstaPay معلقة.";
-  box.querySelectorAll(".approve-sub").forEach(btn=>btn.onclick=async()=>{
-    if(!confirm("تأكدت من وصول التحويل؟ سيتم تفعيل الاشتراك فورًا."))return;
-    btn.disabled=true;
-    const rr=await fetch("/api/admin/subscriptions/approve-instapay",{method:"POST",headers:{Authorization:"Bearer "+session.access_token,"Content-Type":"application/json"},body:JSON.stringify({subscription_id:btn.dataset.id,payment_reference:btn.dataset.ref})});
-    const dd=await rr.json().catch(()=>({}));
-    if(!rr.ok){alert(dd.error||"تعذر تفعيل الاشتراك.");btn.disabled=false;return}
-    await load();
-  });
+ const cfg=await fetch("/api/public-config").then(r=>r.json()).catch(()=>({}));
+ const root=document.querySelector("main");
+ if(!cfg.supabaseUrl||!cfg.supabaseKey){
+   document.querySelector("#info").textContent="Supabase Auth is not configured.";
+   return;
+ }
+ const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey);
+ const session=(await sb.auth.getSession()).data.session;
+ const adminShell=document.querySelector("#adminShell");
+ const loginShell=document.querySelector("#adminLogin");
+ const loginForm=document.querySelector("#adminLoginForm");
+ const loginMsg=document.querySelector("#loginMsg");
+ const showLogin=(msg="")=>{
+   loginShell.style.display="block"; adminShell.style.display="none"; loginMsg.textContent=msg;
  };
- await load();
+ const showAdmin=()=>{
+   loginShell.style.display="none"; adminShell.style.display="block";
+ };
+ const verifyAndLoad=async()=>{
+   const s=(await sb.auth.getSession()).data.session;
+   if(!s){showLogin("");return;}
+   const h={Authorization:"Bearer "+s.access_token};
+   const ping=await fetch("/api/admin/ping",{headers:h}).catch(()=>null);
+   if(!ping||!ping.ok){
+     await sb.auth.signOut();
+     showLogin("الحساب ده مش مسموح له بدخول لوحة الـAdmin.");
+     return;
+   }
+   showAdmin();
+   document.querySelector("#info").textContent="Admin access confirmed.";
+   const load=async()=>{
+     const r=await fetch("/api/admin/orders",{headers:h});
+     const data=await r.json().catch(()=>[]);
+     if(!r.ok){document.querySelector("#orders").textContent=data.error||"Failed to load orders.";return;}
+     document.querySelector("#orders").innerHTML=data.length?data.map(o=>'<article style="border:1px solid rgba(255,255,255,.12);padding:18px;margin:12px 0;border-radius:14px"><strong>'+esc(o.id)+'</strong><p>'+esc(o.customer_name||"")+" · "+esc(o.customer_phone||"")+" · "+esc(o.total_amount||0)+" EGP</p><p>"+esc(o.order_status||"")+" · "+esc(o.delivery_status||"")+" · "+esc(o.payment_status||"")+'</p><select data-id="'+String(o.id)+'" class="status"><option value="Pending">Pending</option><option value="With Shipping Company">With Shipping Company</option><option value="Out for Delivery">Out for Delivery</option><option value="Delivered">Delivered</option><option value="Returned">Returned</option></select></article>').join(""):"No website orders yet.";
+     data.forEach(o=>{const x=document.querySelector('.status[data-id="'+o.id+'"]');if(x)x.value=o.delivery_status||"Pending";});
+     document.querySelectorAll(".status").forEach(x=>x.onchange=async()=>{
+       const rr=await fetch("/api/admin/orders/status",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({order_id:x.dataset.id,delivery_status:x.value})});
+       if(!rr.ok)alert("Could not update order.");
+     });
+   };
+   const loadSubscriptions=async()=>{
+     const box=document.querySelector("#subscriptionList");
+     const r=await fetch("/api/admin/subscriptions",{headers:h});
+     const data=await r.json().catch(()=>[]);
+     if(!r.ok){box.textContent="Subscription admin access unavailable.";return;}
+     const pending=(data||[]).filter(x=>x.status==="pending"&&x.payment_method==="instapay");
+     box.innerHTML=pending.length?pending.map(x=>'<article style="border:1px solid rgba(255,255,255,.12);padding:16px;margin:12px 0;border-radius:14px"><strong>'+esc(x.customer_name||"")+'</strong><p>'+esc(x.customer_email||"")+" · "+esc(x.subscription_plans?.name||"")+" · "+esc(x.subscription_plans?.price||0)+"</p><p>InstaPay ref: <b>"+esc(x.payment_reference||"لم يُرسل بعد")+'</b></p><p style="opacity:.55;font-size:12px">'+esc(x.id)+'</p><button class="btn approve-sub" data-id="'+esc(x.id)+'" data-ref="'+esc(x.payment_reference||"")+'" '+(x.payment_reference?"":"disabled")+'>تأكيد التحويل وتفعيل الحساب</button></article>').join(""):"لا توجد تحويلات InstaPay معلقة.";
+     box.querySelectorAll(".approve-sub").forEach(btn=>btn.onclick=async()=>{
+       if(!confirm("تأكدت من وصول التحويل؟ سيتم تفعيل الاشتراك فورًا."))return;
+       btn.disabled=true;
+       const rr=await fetch("/api/admin/subscriptions/approve-instapay",{method:"POST",headers:{...h,"Content-Type":"application/json"},body:JSON.stringify({subscription_id:btn.dataset.id,payment_reference:btn.dataset.ref})});
+       const dd=await rr.json().catch(()=>({}));
+       if(!rr.ok){alert(dd.error||"تعذر تفعيل الاشتراك.");btn.disabled=false;return;}
+       await loadSubscriptions();
+     });
+   };
+   await load(); await loadSubscriptions();
+   document.querySelector("#logout").onclick=async()=>{await sb.auth.signOut();showLogin("تم تسجيل الخروج.");};
+ };
+ loginForm.onsubmit=async e=>{
+   e.preventDefault(); loginMsg.textContent="جاري تسجيل الدخول…";
+   const email=document.querySelector("#adminEmail").value.trim();
+   const password=document.querySelector("#adminPassword").value;
+   const {error}=await sb.auth.signInWithPassword({email,password});
+   if(error){loginMsg.textContent=error.message==="Invalid login credentials"?"الإيميل أو الباسورد غير صحيح.":error.message;return;}
+   await verifyAndLoad();
+ };
+ await verifyAndLoad();
 })();
 </script></body></html>
