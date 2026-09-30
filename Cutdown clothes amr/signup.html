@@ -100,9 +100,8 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 </div>
 </main>
 <script>
-const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan");
+const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan");const code=new URLSearchParams(location.search).get("plan");
 (async()=>{
-  const code=new URLSearchParams(location.search).get("plan");
   const r=await fetch("/api/subscription/plans").catch(()=>null);
   const d=r?await r.json().catch(()=>({})):{};
   const plan=(d.plans||[]).find(x=>String(x.code)===String(code));
