@@ -1,0 +1,40 @@
+name: Web migration validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [web-migration/phase-1-plan]
+
+jobs:
+  syntax-and-tenant-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate server syntax
+        run: node --check "Cutdown clothes amr/server.js"
+      - name: Validate tenant-scoped preview endpoints
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const source = fs.readFileSync('Cutdown clothes amr/server.js', 'utf8');
+          const required = [
+            'async function requireTenantAdmin',
+            'app.get("/api/app/session"',
+            'app.get("/api/app/products"',
+            'app.get("/api/app/inventory"',
+            '.eq("brand_id",brandId)'
+          ];
+          const missing = required.filter((needle) => !source.includes(needle));
+          if (missing.length) {
+            console.error('Missing tenant-scoping safeguards:', missing);
+            process.exit(1);
+          }
+          console.log('Tenant-scoped preview endpoints and brand filters found.');
+          NODE
+      - name: Validate management page exists
+        run: test -s "Cutdown clothes amr/app.html"
