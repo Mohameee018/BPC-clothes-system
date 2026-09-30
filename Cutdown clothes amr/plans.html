@@ -1,12 +1,105 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BPC Clothes System — الاشتراكات</title><link rel="stylesheet" href="style.css"></head><body><main style="min-height:100vh;padding:32px"><section class="checkout-card glass" style="max-width:1000px;width:100%;margin:auto"><p class="eyebrow">BPC CLOTHES SYSTEM</p><h1>اختار باقة الاشتراك</h1><p style="opacity:.8">الوصول لنظام الإدارة متاح فقط للحسابات المرتبطة باشتراك مدفوع. بياناتك تفضل محفوظة حتى لو الاشتراك انتهى.</p><div id="plans" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:24px">Loading…</div><div style="margin-top:24px;padding:18px;border:1px solid rgba(255,255,255,.12);border-radius:14px"><h3>مش عارف تدفع أونلاين؟</h3><p>تقدر تتواصل مع الإدارة للتحويل يدويًا، وبعد تأكيد الدفع هيوصلك كود تفعيل أو بيانات الحساب.</p><a id="contact" class="btn" href="#">تواصل مع الإدارة</a></div><div style="margin-top:18px"><a class="btn" href="/app.html">دخول النظام</a></div></section></main><script>
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="خطط اشتراك BPC Clothes System لإدارة المنتجات والمخزون والطلبات والمرتجعات.">
+<title>BPC Clothes System — الاشتراكات</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+body.plans-page{background:#061b10;color:#f7fbf8;font-family:Inter,sans-serif;min-height:100vh}
+.plans-shell{min-height:100vh;padding:clamp(24px,5vw,64px) 20px;position:relative;overflow:hidden}
+.plans-shell:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 15% 15%,rgba(57,201,121,.18),transparent 35%),radial-gradient(circle at 85% 80%,rgba(142,233,177,.1),transparent 30%);pointer-events:none}
+.plans-wrap{position:relative;z-index:1;width:min(1160px,100%);margin:auto}
+.plans-top{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:56px}
+.plans-brand{font-weight:700;letter-spacing:-.04em;font-size:20px}
+.plans-back{color:rgba(247,251,248,.65);font-size:13px}
+.plans-hero{max-width:760px;margin-bottom:38px}
+.plans-eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8ee9b1;margin:0 0 16px}
+.plans-hero h1{font-size:clamp(44px,7vw,76px);line-height:.98;letter-spacing:-.055em;font-weight:500;margin:0 0 18px}
+.plans-hero p{color:rgba(247,251,248,.68);font-size:16px;line-height:1.7;max-width:650px;margin:0}
+.plans-promise{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.plans-promise span{padding:9px 13px;border:1px solid rgba(142,233,177,.18);background:rgba(255,255,255,.045);border-radius:999px;font-size:12px;color:rgba(247,251,248,.8);backdrop-filter:blur(12px)}
+.plans-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.plan-card{position:relative;padding:28px;border-radius:24px;border:1px solid rgba(190,255,214,.16);background:rgba(8,43,25,.64);backdrop-filter:blur(22px);min-height:360px;display:flex;flex-direction:column}
+.plan-card.featured{border-color:rgba(142,233,177,.6);background:linear-gradient(145deg,rgba(57,201,121,.14),rgba(8,43,25,.72))}
+.plan-card.featured:before{content:"الأكثر مرونة";position:absolute;top:18px;left:18px;background:#8ee9b1;color:#062617;padding:6px 10px;border-radius:999px;font-size:10px;font-weight:700}
+.plan-index{font-size:11px;color:rgba(247,251,248,.42);letter-spacing:.15em}
+.plan-card h2{font-size:28px;letter-spacing:-.04em;margin:24px 0 8px}
+.plan-duration{color:#8ee9b1;font-size:13px;margin:0 0 18px}
+.plan-price{font-size:38px;font-weight:600;letter-spacing:-.04em;margin:0}
+.plan-price small{font-size:12px;font-weight:400;color:rgba(247,251,248,.5)}
+.plan-copy{color:rgba(247,251,248,.64);line-height:1.6;font-size:13px;margin:14px 0 22px}
+.plan-card .plan-btn{margin-top:auto;display:flex;align-items:center;justify-content:center;border-radius:14px;padding:13px 16px;background:#39c979;color:#062617;font-weight:600}
+.plan-card .plan-btn:hover{background:#8ee9b1}
+.plans-support{margin-top:18px;padding:24px;border-radius:22px;border:1px solid rgba(142,233,177,.16);background:rgba(255,255,255,.045);display:flex;align-items:center;justify-content:space-between;gap:20px}
+.plans-support h3{margin:0 0 6px;font-size:19px}
+.plans-support p{margin:0;color:rgba(247,251,248,.6);font-size:13px;line-height:1.6}
+.plans-support a{flex:0 0 auto;padding:12px 17px;border-radius:13px;background:#fff;color:#062617;font-size:13px;font-weight:600}
+.plans-footer{margin-top:24px;display:flex;justify-content:space-between;gap:12px;color:rgba(247,251,248,.4);font-size:11px}
+@media(max-width:850px){.plans-grid{grid-template-columns:1fr}.plan-card{min-height:0}.plans-support{align-items:flex-start;flex-direction:column}.plans-support a{width:100%;text-align:center}.plans-top{margin-bottom:40px}}
+@media(max-width:520px){.plans-shell{padding-inline:16px}.plans-hero h1{font-size:44px}.plans-footer{flex-direction:column}}
+</style>
+</head>
+<body class="plans-page">
+<main class="plans-shell">
+<div class="plans-wrap">
+  <div class="plans-top">
+    <a class="plans-brand" href="/index.html">BPC <span style="color:#8ee9b1">CLOTHES SYSTEM</span></a>
+    <a class="plans-back" href="/index.html">العودة للموقع ←</a>
+  </div>
+
+  <section class="plans-hero">
+    <p class="plans-eyebrow">BPC CLOTHES SYSTEM · ACCESS</p>
+    <h1>اشتراك واحد، وإدارة أوضح لشغلك.</h1>
+    <p>خلّي المنتجات والمخزون والطلبات والمرتجعات في نظام واحد بدل ما تتابع شغلك بين ملفات وأدوات منفصلة. اختار المدة المناسبة ليك وابدأ استخدام النظام بحسابك.</p>
+    <div class="plans-promise">
+      <span>✓ إدارة المنتجات والمخزون</span>
+      <span>✓ الطلبات والمرتجعات</span>
+      <span>✓ حساب آمن مرتبط باشتراكك</span>
+    </div>
+  </section>
+
+  <section id="plans" class="plans-grid" aria-live="polite">
+    <article class="plan-card"><span>...</span><h2>جارٍ تحميل الباقات</h2></article>
+  </section>
+
+  <section class="plans-support">
+    <div>
+      <h3>الدفع أونلاين غير متاح؟</h3>
+      <p>ولا يهمك. تواصل مع الدعم، وحوّل المبلغ بالطريقة المتفق عليها، وبعد تأكيد الدفع نجهز لك الاشتراك وكود التفعيل.</p>
+    </div>
+    <a id="support" href="https://wa.me/201080910753" target="_blank" rel="noopener noreferrer">تواصل مع الدعم عبر واتساب</a>
+  </section>
+
+  <div class="plans-footer">
+    <span>الاشتراك المدفوع مطلوب للوصول إلى نظام الإدارة.</span>
+    <a href="/app.html">عندي حساب بالفعل · تسجيل الدخول</a>
+  </div>
+</div>
+</main>
+<script>
 (async()=>{
- const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
- const cfg=await fetch("/api/public-config").then(r=>r.json()).catch(()=>({}));
- const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"");
- const contact=document.querySelector("#contact");
- if(wa)contact.href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System");
- else{contact.href="mailto:support@bpc.local";contact.textContent="تواصل مع الإدارة";}
- const r=await fetch("/api/subscription/plans"),d=await r.json();
- document.querySelector("#plans").innerHTML=r.ok?(d.plans||[]).map(p=>'<article style="padding:22px;border:1px solid rgba(255,255,255,.12);border-radius:16px"><h2>'+esc(p.name)+'</h2><p>'+Number(p.duration_days/30).toFixed(p.duration_days===365?0:1)+' شهر</p><h3>'+Number(p.price||0).toLocaleString("ar-EG")+' EGP</h3><a class="btn" href="/signup.html?plan='+encodeURIComponent(p.code)+'">لدي كود تفعيل</a></article>').join(""):"تعذر تحميل الباقات.";
-})();
-</script></body></html>
+  const esc=v=>String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+  const cfg=await fetch("/api/public-config").then(r=>r.ok?r.json():{}).catch(()=>({}));
+  const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"")||"201080910753";
+  document.querySelector("#support").href="https://wa.me/"+wa+"?text="+encodeURIComponent("أريد الاشتراك في BPC Clothes System");
+  const r=await fetch("/api/subscription/plans").catch(()=>null);
+  const d=r?await r.json().catch(()=>({})):({});
+  const plans=Array.isArray(d.plans)?d.plans:[];
+  const labels={monthly:"شهري",quarterly:"3 شهور",yearly:"سنوي"};
+  document.querySelector("#plans").innerHTML=r&&r.ok&&plans.length?plans.map((p,i)=>{
+    const code=String(p.code||"").toLowerCase();
+    const label=labels[code]||String(p.name||"باقة");
+    const duration=Number(p.duration_days||0);
+    const durationText=duration===30?"30 يوم":duration===90?"90 يوم":duration===365?"365 يوم":duration+" يوم";
+    const copy=duration===365?"اختيار مناسب لو عايز تركز على شغلك وتقلل التجديدات.":duration===90?"مدة متوازنة لو عايز مساحة أكبر للتجربة والتشغيل.":"ابدأ بخطوة بسيطة واختبر النظام على شغلك بدون التزام طويل.";
+    return '<article class="plan-card '+(duration===90?"featured":"")+'"><span class="plan-index">0'+(i+1)+'</span><h2>'+esc(label)+'</h2><p class="plan-duration">'+durationText+'</p><p class="plan-price">'+Number(p.price||0).toLocaleString("ar-EG")+' <small>EGP</small></p><p class="plan-copy">'+copy+'</p><a class="plan-btn" href="/signup.html?plan='+encodeURIComponent(p.code||"")+'">ابدأ الاشتراك ←</a></article>';
+  }).join(""):'<article class="plan-card" style="grid-column:1/-1"><h2>تعذر تحميل الباقات</h2><p class="plan-copy">حاول مرة أخرى أو تواصل مع الدعم.</p></article>';
+})().catch(()=>{document.querySelector("#plans").innerHTML='<article class="plan-card" style="grid-column:1/-1"><h2>تعذر تحميل الباقات</h2><p class="plan-copy">حاول مرة أخرى أو تواصل مع الدعم.</p></article>'});
+</script>
+</body>
+</html>
