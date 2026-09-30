@@ -505,6 +505,27 @@ app.get("/api/admin/subscriptions",async(q,r)=>{
  const phones=new Map((profiles.data||[]).map(x=>[x.id,x.phone||""]));
  r.json(rows.map(x=>({...x,customer_phone:phones.get(x.auth_user_id)||""})));
 });
+app.get("/api/admin/customers",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const profiles=await supabase.from("profiles").select("id,name,phone,role,brand_id,brands(id,name,slug,active)").eq("role","admin").order("name",{ascending:true}).limit(1000);
+ if(profiles.error)return r.status(500).json({error:"Could not load customers."});
+ const ids=(profiles.data||[]).map(x=>x.id);
+ const subs=ids.length?await supabase.from("subscriptions").select("id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,created_at,subscription_plans(code,name,duration_days,price)").in("auth_user_id",ids).order("created_at",{ascending:false}):{data:[],error:null};
+ if(subs.error)return r.status(500).json({error:"Could not load customer subscriptions."});
+ const latest=new Map();
+ for(const s of (subs.data||[]))if(!latest.has(s.auth_user_id))latest.set(s.auth_user_id,s);
+ r.json((profiles.data||[]).map(p=>{const s=latest.get(p.id);return {id:p.id,name:p.name||"",phone:p.phone||"",role:p.role,brand:p.brands||null,subscription:s||null};}));
+});
+app.post("/api/admin/customers/reset-password",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const userId=String(q.body?.user_id||"").trim(),password=String(q.body?.password||"");
+ if(!userId||password.length<8)return r.status(400).json({error:"User ID and a password of at least 8 characters are required."});
+ const profile=await supabase.from("profiles").select("id,role").eq("id",userId).maybeSingle();
+ if(profile.error||!profile.data||profile.data.role!=="admin")return r.status(404).json({error:"Customer account not found."});
+ const updated=await supabase.auth.admin.updateUserById(userId,{password});
+ if(updated.error)return r.status(400).json({error:updated.error.message});
+ r.json({ok:true});
+});
 app.post("/api/admin/subscriptions/create",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual"),amount=Number(q.body?.amount||0);
