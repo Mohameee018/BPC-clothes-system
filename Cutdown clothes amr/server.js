@@ -235,7 +235,7 @@ async function createPaymobIntention({amountCents,email,name,phone,planName,paym
  const publicKey=String(process.env.PAYMOB_PUBLIC_KEY||"").trim();
  const methods=String(process.env.PAYMOB_PAYMENT_METHODS||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>/^\\d+$/.test(x)?Number(x):x);
  if(!secret||!publicKey||!methods.length)throw new Error("PAYMOB_NOT_CONFIGURED");
- const baseUrl=String(process.env.PUBLIC_BASE_URL||"").replace(/\\/$/,"");
+ const baseUrl=String(process.env.PUBLIC_BASE_URL||"").replace(/\/$/,"");
  if(!baseUrl)throw new Error("PUBLIC_BASE_URL_NOT_CONFIGURED");
  const response=await fetch(paymobBase+"/v1/intention/",{
   method:"POST",
