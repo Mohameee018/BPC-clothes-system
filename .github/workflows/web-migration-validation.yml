@@ -27,7 +27,8 @@ jobs:
             'app.get("/api/app/session"',
             'app.get("/api/app/products"',
             'app.get("/api/app/inventory"',
-            '.eq("brand_id",brandId)'
+            '.eq("brand_id",brandId)',
+            'const path="brands/"+safeFileName(q.brandId)+"/desktop/'
           ];
           const missing = required.filter((needle) => !source.includes(needle));
           if (missing.length) {
