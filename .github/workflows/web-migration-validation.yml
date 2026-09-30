@@ -33,6 +33,8 @@ jobs:
             'Invalid or duplicate variant ID/stock.',
             'preparedImages.push({img,bytes,detected})',
             'Could not prepare product images.'
+            'Invalid JSON request body.',
+            'Request body was interrupted. Please retry.'
           ];
           const missing = required.filter((needle) => !source.includes(needle));
           if (missing.length) {
