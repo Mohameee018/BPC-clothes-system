@@ -263,7 +263,7 @@ function paymobTxnHmacValid(obj,received){
  const source=obj.source_data||{},order=obj.order||{};
  const values=[obj.amount_cents,obj.created_at,obj.currency,obj.error_occured,obj.has_parent_transaction,obj.id,obj.integration_id,obj.is_3d_secure,obj.is_auth,obj.is_capture,obj.is_refunded,obj.is_standalone_payment,obj.is_voided,order.id,obj.owner,obj.pending,source.pan,source.sub_type,source.type,obj.success].map(v=>v===true?"true":v===false?"false":String(v??""));
  const expected=crypto.createHmac("sha512",secret).update(values.join("")).digest("hex");
- return crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(String(received)));
+ const actual=Buffer.from(String(received));const expectedBuf=Buffer.from(expected);return actual.length===expectedBuf.length&&crypto.timingSafeEqual(expectedBuf,actual);
 }
 app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"subscription-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
