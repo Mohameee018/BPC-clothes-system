@@ -31,12 +31,14 @@ function showManual(s){
  details.style.display="block";details.innerHTML=isI?
  '<div class="row"><span>حساب InstaPay</span><b>'+esc(s.payment?.address||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>':
  '<div class="row"><span>Vodafone Cash</span><b>'+esc(s.payment?.number||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>';
- actions.innerHTML='<button class="primary" id="pay">الذهاب للدفع الآن ←</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
- document.querySelector("#pay").onclick=()=>{
-   navigator.clipboard?.writeText(isI?(s.payment?.address||""):(s.payment?.number||"")).catch(()=>{});
-   if(!isI){ location.href="tel:*9*7%23"; return; }
-   msg.textContent="تم نسخ عنوان InstaPay. افتح تطبيق InstaPay واختر إرسال الأموال ثم أدخل العنوان والمبلغ الظاهرين بالأعلى. InstaPay يتطلب تأكيد التحويل من داخل التطبيق.";
- };
+ actions.innerHTML=isI
+   ? '<a class="btn primary" id="pay" href="https://ipn.eg/S/mohame1131/instapay/4kO7KH" target="_blank" rel="noopener">الذهاب للدفع الآن ←</a><a class="btn secondary" href="/plans.html">تغيير الباقة</a>'
+   : '<button class="primary" id="pay" type="button">الذهاب للدفع الآن ←</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
+ if(!isI){
+   document.querySelector("#pay").onclick=()=>{
+     msg.textContent="للدفع عبر Vodafone Cash، الرجاء التواصل مع الدعم لإتمام عملية الدفع وتفعيل الحساب.";
+   };
+ }
  const form=document.createElement("form");form.innerHTML='<input name="reference" placeholder="رقم/مرجع عملية التحويل" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button class="primary" style="width:100%;margin-top:10px" type="submit">إرسال إثبات التحويل</button>';details.appendChild(form);
  form.onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(form).entries());const r=await fetch("/api/subscription/manual-transfer-reference",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({...b,payment_method:s.payment_method})});const d=await r.json().catch(()=>({}));msg.textContent=r.ok?"تم إرسال رقم العملية للمراجعة. بعد تأكيد الدفع سيتم تفعيل الحساب.":(d.error||"تعذر إرسال رقم العملية.");};
 }
