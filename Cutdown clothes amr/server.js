@@ -224,7 +224,7 @@ app.get("/api/desktop/update",async(q,r)=>{
    return r.json({brand:brand.data,version:String(manifest.data.version),download_url:url,sha256:sha,mandatory:manifest.data.mandatory===true,updated_at:manifest.data.updated_at});
  }
  const url=String((process.env.BPC_DESKTOP_DOWNLOAD_URL||process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL)||"").trim();
- const sha=String(process.env.BPC_DESKTOP_SHA||process.env.CUTDOWN_DESKTOP_SHA||"").trim().toLowerCase();
+ const sha=String(process.env.BPC_DESKTOP_SHA256||process.env.CUTDOWN_DESKTOP_SHA256||process.env.BPC_DESKTOP_SHA||process.env.CUTDOWN_DESKTOP_SHA||"").trim().toLowerCase();
  if(url&&/^https:\/\//i.test(url)&&/^[a-f0-9]{64}$/.test(sha)){
    return r.json({brand:brand.data,version:String((process.env.BPC_DESKTOP_VERSION||process.env.CUTDOWN_DESKTOP_VERSION)||"1.0.0"),download_url:url,sha256:sha,mandatory:String((process.env.BPC_DESKTOP_UPDATE_MANDATORY||process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY)||"false")==="true"});
  }
