@@ -28,7 +28,11 @@ jobs:
             'app.get("/api/app/products"',
             'app.get("/api/app/inventory"',
             '.eq("brand_id",brandId)',
-            'const path="brands/"+safeFileName(q.brandId)+"/desktop/'
+            'const path="brands/"+safeFileName(q.brandId)+"/desktop/',
+            'Validate every nested payload before the first database/storage mutation.',
+            'Invalid or duplicate variant ID/stock.',
+            'preparedImages.push({img,bytes,detected})',
+            'Could not prepare product images.'
           ];
           const missing = required.filter((needle) => !source.includes(needle));
           if (missing.length) {
