@@ -389,6 +389,19 @@ app.get("/api/desktop/update",async(q,r)=>{
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
 app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim()})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
+app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"customer-signup"}),async(q,r)=>{
+ if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
+ const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),slug=String(q.body?.brand_slug||"").trim().toLowerCase();
+ if(!email||password.length<8||!name)return r.status(400).json({error:"Name, valid email, and password (8+ characters) are required."});
+ if(name.length>120||email.length>254||phone.length>40)return r.status(400).json({error:"One or more account fields are too long."});
+ const brand=slug?await supabase.from("brands").select("id,slug,active").eq("slug",slug).eq("active",true).maybeSingle():{data:null,error:null};
+ if(brand.error)return r.status(503).json({error:"Could not verify store brand."});
+ if(!brand.data)return r.status(404).json({error:"Store brand not found or inactive. Refresh the store and try again."});
+ const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone,brand_slug:brand.data.slug}}});
+ if(signed.error)return r.status(400).json({error:signed.error.message});
+ if(!signed.data?.user)return r.status(400).json({error:"Account could not be created."});
+ r.status(201).json({user:{id:signed.data.user.id,email:signed.data.user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
+});
 app.get("/api/auth/me",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id);
