@@ -569,7 +569,7 @@ async function findOrCreateCustomer(customer,brandId=configuredBrandId()){
  const created=await supabase.from("customers").insert({...payload,brand_id:brandId}).select("id").single();
  if(!created.error&&created.data?.id)return created.data.id;
  if(created.error){
-   const retry=await supabase.from("customers").select("id").eq("brand_id",configuredBrandId()).eq("phone",phone).maybeSingle();
+   const retry=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
    if(retry.error)throw retry.error;
    if(retry.data?.id){
      const updated=await supabase.from("customers").update(payload).eq("id",retry.data.id).select("id").maybeSingle();
