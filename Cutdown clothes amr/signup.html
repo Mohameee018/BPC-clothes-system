@@ -36,6 +36,12 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 .signup-form button{border:0;border-radius:14px;padding:14px;background:#39c979;color:#062617;font-weight:600;cursor:pointer}
 .signup-form button:hover{background:#8ee9b1}
 .signup-form button:disabled{opacity:.55;cursor:not-allowed}
+.payment-choice{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:4px 0}
+.payment-choice label{padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.04);cursor:pointer;font-size:12px}
+.payment-choice label:has(input:checked){border-color:#39c979;background:rgba(57,201,121,.1)}
+.payment-choice input{width:auto;margin-left:6px}
+.instapay-box{display:none;margin-top:14px;padding:18px;border-radius:16px;border:1px solid rgba(142,233,177,.18);background:rgba(57,201,121,.07)}
+.instapay-box.show{display:block}.instapay-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:12px}.instapay-row:last-child{border-bottom:0}.instapay-row b{color:#8ee9b1}.instapay-form{display:grid;gap:10px;margin-top:14px}.instapay-form input{width:100%;border:1px solid rgba(255,255,255,.12);background:rgba(247,251,248,.96);color:#0b1710;padding:12px 13px;border-radius:12px}.instapay-form button{border:0;border-radius:12px;padding:12px;background:#8ee9b1;color:#062617;font-weight:600;cursor:pointer}
 .signup-msg{min-height:22px;font-size:13px;line-height:1.5}
 .signup-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;padding-top:18px;border-top:1px solid rgba(255,255,255,.1);font-size:12px}
 .signup-links a{color:rgba(247,251,248,.68)}.signup-links a:hover{color:#8ee9b1}
@@ -89,7 +95,12 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
     <input name="email" type="email" placeholder="البريد الإلكتروني" maxlength="254" required>
     <input name="phone" placeholder="رقم الهاتف" maxlength="40">
     <input name="password" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" minlength="8" required>
-    <button type="submit">إنشاء الحساب والانتقال للدفع ←</button>
+    <div class="payment-choice" aria-label="طريقة الدفع">
+      <label><input type="radio" name="payment_method" value="paymob" checked> Visa / Mastercard</label>
+      <label><input type="radio" name="payment_method" value="instapay"> InstaPay</label>
+    </div>
+    <button type="submit">إنشاء الحساب والمتابعة ←</button>
+    <div id="instapayBox" class="instapay-box"></div>
     <div id="msg" class="signup-msg" aria-live="polite"></div>
   </form>
   <div class="signup-links">
@@ -100,13 +111,14 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 </div>
 </main>
 <script>
-const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan");const code=new URLSearchParams(location.search).get("plan");
+const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan"),instapayBox=document.querySelector("#instapayBox");const code=new URLSearchParams(location.search).get("plan");
 (async()=>{
   const r=await fetch("/api/subscription/plans").catch(()=>null);
   const d=r?await r.json().catch(()=>({})):{};
   const plan=(d.plans||[]).find(x=>String(x.code)===String(code));
   selected.textContent=plan?("الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP"): "اختار الباقة من صفحة الاشتراكات أولًا.";
 })();
+const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 f.onsubmit=async e=>{
   e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
   const button=f.querySelector("button");button.disabled=true;
@@ -115,9 +127,27 @@ f.onsubmit=async e=>{
     const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
-    if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);msg.textContent="تم إنشاء الحساب. جارٍ تحويلك إلى بوابة الدفع…";
-    msg.style.color="#8ee9b1";
-    if(d.payment?.checkout_url)location.href=d.payment.checkout_url;else {msg.textContent="تم إنشاء الحساب لكن تعذر فتح بوابة الدفع. تواصل مع الدعم.";msg.style.color="#ffb4b4"}
+    if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);
+    if(d.payment?.method==="instapay"){
+      f.style.display="none";instapayBox.classList.add("show");
+      const i=d.payment.instructions||{};
+      instapayBox.innerHTML='<strong style="color:#8ee9b1">حوّل المبلغ ثم أرسل رقم العملية</strong><p style="color:rgba(247,251,248,.62);font-size:12px;line-height:1.7">بعد التحويل، اكتب رقم العملية هنا. لن يتم تفعيل الحساب إلا بعد مراجعة التحويل يدويًا.</p>'+
+        '<div class="instapay-row"><span>InstaPay</span><b>'+esc(i.address||"—")+'</b></div>'+
+        '<div class="instapay-row"><span>الاسم</span><b>'+esc(i.name||"—")+'</b></div>'+
+        '<div class="instapay-row"><span>البنك</span><b>'+esc(i.bank||"—")+'</b></div>'+
+        '<div class="instapay-row"><span>رقم الحساب</span><b>'+esc(i.account||"—")+'</b></div>'+
+        '<div class="instapay-row"><span>المبلغ</span><b>'+Number(i.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})+" "+esc(i.currency||"USD")+'</b></div>'+
+        '<form id="instapaySubmit" class="instapay-form"><input name="reference" placeholder="رقم/مرجع عملية InstaPay" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button type="submit">إرسال إثبات التحويل</button></form>';
+      document.querySelector("#instapaySubmit").onsubmit=async ev=>{
+        ev.preventDefault();const b=Object.fromEntries(new FormData(ev.currentTarget).entries());const rr=await fetch("/api/subscription/instapay-reference",{method:"POST",headers:{Authorization:"Bearer "+(d.session?.access_token||sessionStorage.getItem("bpc_signup_token")||""),"Content-Type":"application/json"},body:JSON.stringify(b)});const dd=await rr.json().catch(()=>({}));
+        if(!rr.ok){msg.textContent=dd.error||"تعذر إرسال المرجع.";msg.style.color="#ffb4b4";return}
+        msg.textContent="تم إرسال التحويل للمراجعة. بعد تأكيد الدفع من الإدارة هيتفعل حسابك.";msg.style.color="#8ee9b1";
+      };
+      msg.textContent="تم إنشاء الحساب. حوّل المبلغ ثم أرسل رقم العملية.";msg.style.color="#8ee9b1";
+    }else{
+      msg.textContent="تم إنشاء الحساب. جارٍ تحويلك إلى بوابة الدفع…";msg.style.color="#8ee9b1";
+      if(d.payment?.checkout_url)location.href=d.payment.checkout_url;else {msg.textContent="تم إنشاء الحساب لكن تعذر فتح بوابة الدفع. تواصل مع الدعم.";msg.style.color="#ffb4b4"}
+    }
   }catch{msg.textContent="تعذر الاتصال بالخدمة. حاول مرة أخرى.";msg.style.color="#ffb4b4"}
   finally{button.disabled=false}
 };
