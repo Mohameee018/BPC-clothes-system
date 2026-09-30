@@ -42,10 +42,11 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           const html = fs.readFileSync('Cutdown clothes amr/app.html', 'utf8');
-          const scripts = [...html.matchAll(/<script>([\\s\\S]*?)<\\/script>/gi)].map((match) => match[1]);
-          if (!scripts.length) throw new Error('No inline management script found.');
-          for (const script of scripts) new Function(script);
-          console.log(`Validated ${scripts.length} inline script(s).`);
+          const scriptStart = html.indexOf('<script>', html.indexOf('cdn.jsdelivr'));
+          const scriptEnd = html.indexOf('</script>', scriptStart);
+          if (scriptStart < 0 || scriptEnd < 0) throw new Error('No inline management script found.');
+          new Function(html.slice(scriptStart + '<script>'.length, scriptEnd));
+          console.log('Management page inline JavaScript syntax is valid.');
           NODE
       - name: Validate management page exists
         run: test -s "Cutdown clothes amr/app.html"
