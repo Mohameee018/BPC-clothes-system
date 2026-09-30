@@ -407,22 +407,24 @@ app.get("/api/account/orders",async(q,r)=>{
 });
 app.get("/api/admin/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
  const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
- const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",configuredBrandId()).eq("source","website").order("created_at",{ascending:false}).limit(100);
+ const brandId=String(profile.brand_id);
+ const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).limit(500);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
 });
 app.post("/api/admin/orders/status",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
  const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
+ const brandId=String(profile.brand_id);
  const {order_id,order_status,delivery_status}=q.body||{};if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
  const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
  const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
  if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
  if(delivery_status&&!deliveryStatuses.includes(String(delivery_status)))return r.status(400).json({error:"Invalid delivery status."});
  const patch={}; if(order_status)patch.order_status=String(order_status);if(delivery_status)patch.delivery_status=String(delivery_status);
- const updated=await supabase.from("orders").update(patch).eq("id",order_id).eq("brand_id",configuredBrandId()).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
+ const updated=await supabase.from("orders").update(patch).eq("id",order_id).eq("brand_id",brandId).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
  if(updated.error)return r.status(500).json({error:"Internal server error."});if(!updated.data)return r.status(404).json({error:"Website order not found."});r.json({ok:true,order:updated.data});
 });
 
@@ -444,8 +446,8 @@ async function requireSystemAdmin(q,r){
   if(!supabase)return {ok:false,response:r.status(503).json({error:"Supabase is not configured."})};
   const user=await getAuthUser(q); if(!user)return {ok:false,response:r.status(401).json({error:"Not authenticated."})};
   const profile=await getAuthProfile(user.id);
-  if(profile?.role!=="admin"||!profile?.brand_id||String(profile.brand_id)!==configuredBrandId())return {ok:false,response:r.status(403).json({error:"BPC administrator access required."})};
-  const sub=await requireActiveSubscription(user.id,r);if(!sub.ok)return sub;
+  if(profile?.role!=="admin"||!profile?.brand_id)return {ok:false,response:r.status(403).json({error:"Company administrator access required."})};
+  const sub=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);if(!sub.ok)return sub;
   q.systemUser=user;q.brandId=String(profile.brand_id);q.subscription=sub.view;return {ok:true,user,profile,subscription:sub.view};
 }
 function systemColumns(table,obj){const allowed=new Set(SYSTEM_TABLES[table]||[]);const out={};for(const [k,v] of Object.entries(obj||{}))if(allowed.has(k)&&k!=="id"&&k!=="brand_id"&&k!=="created_at"&&k!=="updated_at")out[k]=v;return out}
