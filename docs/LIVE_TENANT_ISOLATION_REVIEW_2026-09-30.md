@@ -16,7 +16,9 @@ Scope: read-only inspection of the linked production Supabase project's table de
   - reviews: public SELECT where approved = true.
 - Admin policies on inventory, warehouses and returns call private.is_admin(); customer/order policies also allow private.is_admin(). Those policy expressions do not visibly compare the row's brand_id with the authenticated user's profiles.brand_id.
 - The new /api/app/* preview endpoints use server-side tenant resolution from the authenticated profile and explicitly filter data by that brand. This is useful defense in depth, but the current static checks do not prove runtime cross-tenant isolation.
-- desktop_update_manifests is RLS-enabled and had no policy in the previously captured advisor output; this needs a deliberate decision for whether reads occur through a privileged server endpoint or an authenticated policy.
+- desktop_update_manifests is RLS-enabled and has no policy in the captured advisor output; this needs a deliberate decision for whether reads occur through a privileged server endpoint or an authenticated policy.
+- The targeted read-only query returned no policies for storage.objects. This does not by itself prove the bucket is private/public; bucket visibility and service-role upload behavior still need explicit verification.
+- The targeted function-grant query confirmed SECURITY DEFINER functions in scope. private.is_admin() grants EXECUTE to authenticated; public.claim_customer_for_auth(), public.current_brand_id(), and public.is_brand_admin() also grant EXECUTE to authenticated (and service_role). Each function has search_path=public. Review the bodies and whether that search_path is sufficient for all referenced objects before making any changes.
 
 ## Risks to resolve before multi-company production use
 
