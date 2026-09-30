@@ -1,0 +1,27 @@
+name: Desktop database inventory tool
+
+on:
+  pull_request:
+    paths:
+      - "scripts/inspect_desktop_sqlite.py"
+      - "scripts/tests/test_inspect_desktop_sqlite.py"
+      - ".github/workflows/desktop-db-inventory.yml"
+  push:
+    branches: [main, "web-migration/**"]
+    paths:
+      - "scripts/inspect_desktop_sqlite.py"
+      - "scripts/tests/test_inspect_desktop_sqlite.py"
+      - ".github/workflows/desktop-db-inventory.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m py_compile scripts/inspect_desktop_sqlite.py
+      - name: Unit tests
+        run: python -m unittest discover -s scripts/tests -v
