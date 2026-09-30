@@ -411,7 +411,7 @@ app.get("/api/admin/orders",async(q,r)=>{
 app.post("/api/admin/orders/status",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});
- const gate=isSuperAdminUser(user)?{ok:true}:{await requireActiveSubscription(user.id,r)}; if(!gate.ok)return gate.response;
+ const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
  const {order_id,order_status,delivery_status}=q.body||{};if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
  const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
  const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
