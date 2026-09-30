@@ -23,7 +23,7 @@ const rateBuckets=new Map();
 function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
 const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
-const configuredBrandId=()=>String(process.env.CUTDOWN_BRAND_ID||DEFAULT_BRAND_ID).trim();
+const configuredBrandId=()=>String((process.env.BPC_BRAND_ID||process.env.CUTDOWN_BRAND_ID)||DEFAULT_BRAND_ID).trim();
 const paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
 
 async function requireDesktopSync(q,r,next){
@@ -181,7 +181,7 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
 });
 async function requireSuperAdmin(req,res){
  const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
- const expected=String(process.env.CUTDOWN_SUPER_ADMIN_EMAIL||"").trim().toLowerCase();
+ const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
  if(!expected||String(user.email||"").toLowerCase()!==expected)return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
  return {ok:true,user};
 }
@@ -223,10 +223,10 @@ app.get("/api/desktop/update",async(q,r)=>{
    if(!/^https:\/\//i.test(url)||!/^[a-f0-9]{64}$/.test(sha))return r.status(500).json({error:"Desktop update manifest is invalid."});
    return r.json({brand:brand.data,version:String(manifest.data.version),download_url:url,sha256:sha,mandatory:manifest.data.mandatory===true,updated_at:manifest.data.updated_at});
  }
- const url=String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||"").trim();
- const sha=String(process.env.CUTDOWN_DESKTOP_SHA256||"").trim().toLowerCase();
+ const url=String((process.env.BPC_DESKTOP_DOWNLOAD_URL||process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL)||"").trim();
+ const sha=String((process.env.BPC_DESKTOP_SHA||process.env.CUTDOWN_DESKTOP_SHA)256||"").trim().toLowerCase();
  if(url&&/^https:\/\//i.test(url)&&/^[a-f0-9]{64}$/.test(sha)){
-   return r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:url,sha256:sha,mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
+   return r.json({brand:brand.data,version:String((process.env.BPC_DESKTOP_VERSION||process.env.CUTDOWN_DESKTOP_VERSION)||"1.0.0"),download_url:url,sha256:sha,mandatory:String((process.env.BPC_DESKTOP_UPDATE_MANDATORY||process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY)||"false")==="true"});
  }
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
