@@ -582,7 +582,24 @@ app.post("/api/system/:table",async(q,r)=>{
   }
   if(table==="warehouses"&&!String(row.name||"").trim())return r.status(400).json({error:"Warehouse name is required."});
   if(table==="customers"&&!String(row.name||"").trim())return r.status(400).json({error:"Customer name is required."});
-  const ins=await supabase.from(table).insert(row).select(SYSTEM_TABLES[table].join(",")).single();if(ins.error)return r.status(400).json({error:"Could not create "+table+" record.",detail:ins.error.message});if(table==="products"){let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();if(wh.error)return r.status(500).json({error:"Product created but warehouse lookup failed."});if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Product created but main warehouse could not be created."});wh={data:nw.data}}const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});if(inv.error)return r.status(500).json({error:"Product created but inventory could not be initialized."});}r.status(201).json(ins.data);
+  const ins=await supabase.from(table).insert(row).select(SYSTEM_TABLES[table].join(",")).single();if(ins.error)return r.status(400).json({error:"Could not create "+table+" record.",detail:ins.error.message});if(table==="products"){let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();if(wh.error)return r.status(500).json({error:"Product created but warehouse lookup failed."});if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Product created but main warehouse could not be created."});wh={data:nw.data}}const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});if(inv.error)return r.status(500).json({error:"Product created but inventory could not be initialized."});}
+  if(table==="product_variants"){
+    const product=await supabase.from("products").select("id").eq("id",row.product_id).eq("brand_id",q.brandId).maybeSingle();
+    if(product.error||!product.data){await supabase.from("product_variants").delete().eq("id",ins.data.id).eq("brand_id",q.brandId);return r.status(400).json({error:"Product does not belong to this brand."});}
+    let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();
+    if(wh.error)return r.status(500).json({error:"Variant created but warehouse lookup failed."});
+    if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Variant created but warehouse could not be created."});wh={data:nw.data};}
+    const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:row.product_id,variant_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});
+    if(inv.error){await supabase.from("product_variants").delete().eq("id",ins.data.id).eq("brand_id",q.brandId);return r.status(500).json({error:"Could not initialize variant inventory."});}
+    const base=await supabase.from("inventory").update({quantity:0,updated_at:new Date().toISOString()}).eq("brand_id",q.brandId).eq("product_id",row.product_id).is("variant_id",null);
+    if(base.error)return r.status(500).json({error:"Variant inventory created but base stock could not be reconciled."});
+    const all=await supabase.from("product_variants").select("stock").eq("brand_id",q.brandId).eq("product_id",row.product_id).eq("active",true);
+    if(all.error)return r.status(500).json({error:"Could not calculate product stock."});
+    const total=(all.data||[]).reduce((n,x)=>n+Number(x.stock||0),0);
+    const synced=await supabase.from("products").update({stock:total,updated_at:new Date().toISOString()}).eq("id",row.product_id).eq("brand_id",q.brandId);
+    if(synced.error)return r.status(500).json({error:"Could not sync product stock."});
+  }
+  r.status(201).json(ins.data);
 });
 app.patch("/api/system/:table/:id",async(q,r)=>{
   const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
