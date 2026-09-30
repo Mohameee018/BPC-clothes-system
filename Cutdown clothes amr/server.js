@@ -661,6 +661,19 @@ app.post("/api/app/product-image",rateLimit({windowMs:60*1000,max:20,keyPrefix:"
  const imageUrl=supabase.storage.from("product-images").getPublicUrl(storagePath).data.publicUrl;
  const saved=await supabase.from("products").update({image_url:imageUrl,updated_at:new Date().toISOString()}).eq("id",productId).eq("brand_id",q.tenant.brandId).select("id,image_url").single();
  if(saved.error)return r.status(500).json({error:"Image uploaded but could not be assigned to product."});
+ // Keep the normalized product_images record in sync with image_url so the public storefront
+ // can use the same image source as the admin panel and desktop sync.
+ const oldImages=await supabase.from("product_images").select("storage_path").eq("brand_id",q.tenant.brandId).eq("product_id",productId).like("storage_path","brands/"+safeFileName(q.tenant.brandId)+"/web/"+safeFileName(productId)+"/%");
+ if(oldImages.error)return r.status(500).json({error:"Image assigned but image index could not be updated."});
+ const stalePaths=(oldImages.data||[]).map(x=>x.storage_path).filter(Boolean).filter(x=>x!==storagePath);
+ if(stalePaths.length)await supabase.storage.from("product-images").remove(stalePaths);
+ const removedRows=await supabase.from("product_images").delete().eq("brand_id",q.tenant.brandId).eq("product_id",productId).like("storage_path","brands/"+safeFileName(q.tenant.brandId)+"/web/"+safeFileName(productId)+"/%");
+ if(removedRows.error)return r.status(500).json({error:"Image assigned but image index could not be updated."});
+ const imageRow=await supabase.from("product_images").insert({
+   brand_id:q.tenant.brandId,product_id:productId,storage_path:storagePath,public_url:imageUrl,
+   alt_text:saved.data?.name||"Product image",sort_order:0,is_primary:true,color:""
+ });
+ if(imageRow.error)return r.status(500).json({error:"Image assigned but storefront image index could not be saved."});
  r.status(201).json(saved.data);
 });
 app.get("/api/app/products",rateLimit({windowMs:60*1000,max:90,keyPrefix:"app-products"}),async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const brandId=q.tenant.brandId;const p=await supabase.from("products").select("id,desktop_id,sku,name,category,description,price,cost_price,stock,minimum_stock,active,is_active,image_url,created_at,updated_at").eq("brand_id",brandId).order("created_at",{ascending:false}).limit(500);if(p.error)return r.status(503).json({error:"Could not load company products."});const ids=(p.data||[]).map(x=>x.id);if(!ids.length)return r.json({products:[]});const [v,i]=await Promise.all([supabase.from("product_variants").select("id,product_id,sku,size,color,stock,active").eq("brand_id",brandId).in("product_id",ids),supabase.from("product_images").select("id,product_id,public_url,storage_path,alt_text,sort_order,color,is_primary").eq("brand_id",brandId).in("product_id",ids).order("sort_order")]);if(v.error||i.error)return r.status(503).json({error:"Could not load product details."});const vm=new Map(),im=new Map();for(const x of v.data||[]){if(!vm.has(x.product_id))vm.set(x.product_id,[]);vm.get(x.product_id).push(x);}for(const x of i.data||[]){if(!im.has(x.product_id))im.set(x.product_id,[]);im.get(x.product_id).push(x);}r.json({products:(p.data||[]).map(x=>({...x,variants:vm.get(x.id)||[],images:im.get(x.id)||[]}))});});
