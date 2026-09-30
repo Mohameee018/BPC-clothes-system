@@ -16,6 +16,7 @@ jobs:
           node-version: 22
       - name: Validate server syntax
         run: node --check "Cutdown clothes amr/server.js"
+      # Keep this assertion block syntax-valid: every required needle must be comma-separated.
       - name: Validate tenant-scoped preview endpoints
         shell: bash
         run: |
