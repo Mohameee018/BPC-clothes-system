@@ -372,14 +372,31 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  if(!email||!password)return r.status(400).json({error:"Email and password are required."});
  const signed=await authClient.auth.signInWithPassword({email,password});
  if(signed.error||!signed.data?.session)return r.status(401).json({error:"Invalid email or password."});
- const user=signed.data.user,profile=await getAuthProfile(user.id);
+ const user=signed.data.user;let profile=await getAuthProfile(user.id);
  if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a BPC company administrator."});}
+ profile=await ensureSubscriberWorkspace(user,profile);
  const brand=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",profile.brand_id).maybeSingle();
  if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This company is inactive or unavailable."});}
  const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);
  if(!gate.ok){await authClient.auth.signOut();return gate.response;}
  r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data,subscription:gate.view});
 });
+async function ensureSubscriberWorkspace(user,profile){
+ if(!supabase||!user?.id||!profile?.brand_id||isSuperAdminUser(user))return profile;
+ const configured=String(configuredBrandId());
+ const sub=await getSubscriptionForUser(user.id);
+ if(!sub||String(sub.brand_id)!==configured||String(profile.brand_id)!==configured)return profile;
+ const name=String(profile.name||user.user_metadata?.name||"Store").trim()||"Store";
+ const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
+ const brandId=crypto.randomUUID(),slug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
+ const created=await supabase.from("brands").insert({id:brandId,name:name+" Store",slug,active:true,website_url:null,settings:{}}).select("id").single();
+ if(created.error)return profile;
+ const pu=await supabase.from("profiles").update({brand_id:brandId}).eq("id",user.id).eq("brand_id",configured);
+ if(pu.error){await supabase.from("brands").delete().eq("id",brandId);return profile;}
+ const su=await supabase.from("subscriptions").update({brand_id:brandId,updated_at:new Date().toISOString()}).eq("id",sub.id).eq("auth_user_id",user.id).eq("brand_id",configured);
+ if(su.error){await supabase.from("profiles").update({brand_id:configured}).eq("id",user.id).eq("brand_id",brandId);await supabase.from("brands").delete().eq("id",brandId);return profile;}
+ return {...profile,brand_id:brandId};
+}
 function isSuperAdminUser(user){
  const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
  return !!expected&&String(user?.email||"").toLowerCase()===expected;
@@ -582,7 +599,7 @@ app.get("/api/auth/me",async(q,r)=>{
 
 async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return null;return {user,profile};}
 async function requireTenantAdmin(req,res){const user=await getAuthUser(req);if(!user)return res.status(401).json({error:"Sign in to continue."});const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return res.status(403).json({error:"Company administrator access required."});const brand=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",profile.brand_id).maybeSingle();if(brand.error)return res.status(503).json({error:"Could not verify company access."});if(!brand.data?.active)return res.status(403).json({error:"This company is inactive."});const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,res);if(!gate.ok)return gate.response;req.tenant={user,profile,brand:brand.data,brandId:String(profile.brand_id),subscription:gate.view};return null;}
-app.get("/api/app/session",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;r.json({user:{id:q.tenant.user.id,email:q.tenant.user.email||null},profile:q.tenant.profile,brand:q.tenant.brand});});
+app.get("/api/app/session",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const profile=await ensureSubscriberWorkspace(q.tenant.user,q.tenant.profile);if(String(profile.brand_id)!==String(q.tenant.brandId)){const brand=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",profile.brand_id).maybeSingle();if(brand.data){q.tenant.profile=profile;q.tenant.brand=brand.data;q.tenant.brandId=String(profile.brand_id);}}r.json({user:{id:q.tenant.user.id,email:q.tenant.user.email||null},profile:q.tenant.profile,brand:q.tenant.brand});});
 app.get("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const b=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).maybeSingle();if(b.error)return r.status(500).json({error:"Could not load settings."});r.json({settings:b.data?.settings||{}});});
 app.patch("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const settings=q.body?.settings;if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","sidebarColor"];const clean={};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(settings,key))clean[key]=settings[key];const u=await supabase.from("brands").update({settings:clean,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings").single();if(u.error)return r.status(500).json({error:"Could not save settings."});r.json({settings:u.data.settings||{}});});
 app.post("/api/app/product-image",rateLimit({windowMs:60*1000,max:20,keyPrefix:"product-image"}),async(q,r)=>{
