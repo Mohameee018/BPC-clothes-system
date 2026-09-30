@@ -129,25 +129,10 @@ f.onsubmit=async e=>{
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
     if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);
     if(d.payment?.method==="instapay"||d.payment?.method==="vodafone_cash"){
-      f.style.display="none";instapayBox.classList.add("show");
-      const i=d.payment.instructions||{}; const isVodafone=d.payment.method==="vodafone_cash"; const label=isVodafone?"Vodafone Cash":"InstaPay";
-      const amount=Number(i.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})+" "+esc(i.currency||"EGP");
-      const destination=isVodafone?(i.number||"—"):(i.address||"—");
-      instapayBox.innerHTML='<strong style="color:#8ee9b1">تم إنشاء الحساب بنجاح ✅</strong><p style="color:rgba(247,251,248,.72);font-size:13px;line-height:1.8;margin:8px 0 14px">الباقة: <b>'+esc(d.subscription?.plan?.name||"")+'</b><br>المبلغ المطلوب: <b>'+amount+'</b></p>'+(isVodafone?'<div class="instapay-row"><span>Vodafone Cash</span><b>'+esc(destination)+'</b></div>':'<div class="instapay-row"><span>InstaPay</span><b>'+esc(destination)+'</b></div><div class="instapay-row"><span>الاسم</span><b>'+esc(i.name||"—")+'</b></div>')+'<div class="instapay-row"><span>المبلغ</span><b>'+amount+'</b></div><button id="payNow" type="button" style="width:100%;margin-top:14px;border:0;border-radius:12px;padding:13px;background:#39c979;color:#062617;font-weight:700;cursor:pointer">الذهاب للدفع الآن ←</button><div id="paymentDetails" style="display:none;margin-top:12px"><p style="color:rgba(247,251,248,.62);font-size:12px;line-height:1.7">افتح تطبيق '+label+'، حوّل <b>'+amount+'</b> إلى البيانات الظاهرة بالأعلى، ثم ارجع هنا وأرسل رقم العملية.</p><form id="manualSubmit" class="instapay-form"><input name="reference" placeholder="رقم/مرجع عملية '+label+'" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button type="submit">إرسال إثبات التحويل</button></form></div>'; 
-      document.querySelector("#payNow").onclick=()=>{
-        document.querySelector("#paymentDetails").style.display="block";
-        navigator.clipboard?.writeText(destination).catch(()=>{});
-        msg.textContent="تم نسخ بيانات الدفع. افتح تطبيق "+label+" وأكمل التحويل بالمبلغ الظاهر.";
-        msg.style.color="#8ee9b1";
-      };
-      document.querySelector("#manualSubmit").onsubmit=async ev=>{
-        ev.preventDefault();const b=Object.fromEntries(new FormData(ev.currentTarget).entries());const rr=await fetch("/api/subscription/manual-transfer-reference",{method:"POST",headers:{Authorization:"Bearer "+(d.session?.access_token||sessionStorage.getItem("bpc_signup_token")||""),"Content-Type":"application/json"},body:JSON.stringify({...b,payment_method:d.payment.method})});const dd=await rr.json().catch(()=>({}));
-        if(!rr.ok){msg.textContent=dd.error||"تعذر إرسال المرجع.";msg.style.color="#ffb4b4";return}
-        msg.textContent="تم إرسال التحويل للمراجعة. بعد تأكيد الدفع من الإدارة هيتفعل حسابك.";msg.style.color="#8ee9b1";
-      };
-      msg.textContent="تم إنشاء الحساب. حوّل المبلغ ثم أرسل رقم العملية.";msg.style.color="#8ee9b1";
-    }else{
-      msg.textContent="تم إنشاء الحساب. جارٍ تحويلك إلى بوابة الدفع…";msg.style.color="#8ee9b1";
+      f.style.display="none";
+      msg.textContent="تم إنشاء الحساب بنجاح. جارٍ تحويلك لصفحة الدفع…";msg.style.color="#8ee9b1";
+      location.href="/payment.html";return;
+    }else{msg.style.color="#8ee9b1";
       if(d.payment?.checkout_url)location.href=d.payment.checkout_url;else {msg.textContent="تم إنشاء الحساب لكن تعذر فتح بوابة الدفع. تواصل مع الدعم.";msg.style.color="#ffb4b4"}
     }
   }catch{msg.textContent="تعذر الاتصال بالخدمة. حاول مرة أخرى.";msg.style.color="#ffb4b4"}
