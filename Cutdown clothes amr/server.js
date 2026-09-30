@@ -275,6 +275,18 @@ app.post("/api/admin/brands/account",async(q,r)=>{
  if(profile.error)return r.status(500).json({error:"Internal server error."});
  r.status(201).json({user_id:created.data.user.id,email,brand:brand.data});
 });
+app.get("/api/admin/plans",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const p=await supabase.from("subscription_plans").select("id,code,name,duration_days,price,active").order("duration_days");
+ if(p.error)return r.status(500).json({error:"Could not load plans."});r.json(p.data||[]);
+});
+app.patch("/api/admin/plans/:id",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const price=Number(q.body?.price),active=q.body?.active!==false;
+ if(!Number.isFinite(price)||price<0)return r.status(400).json({error:"Invalid plan price."});
+ const up=await supabase.from("subscription_plans").update({price,active,updated_at:new Date().toISOString()}).eq("id",q.params.id).select("id,code,name,duration_days,price,active").maybeSingle();
+ if(up.error)return r.status(400).json({error:"Could not update plan."});if(!up.data)return r.status(404).json({error:"Plan not found."});r.json(up.data);
+});
 app.get("/api/admin/subscriptions",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const subs=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,notes,created_at,last_renewed_at,subscription_plans(code,name,duration_days,price)").order("expires_at",{ascending:false}).limit(500);
@@ -350,7 +362,7 @@ app.get("/api/desktop/update",async(q,r)=>{
  }
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
-app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:configuredBrandId()})});
+app.get("/api/public-config",(_q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:configuredBrandId(),supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim()})});
 app.get("/api/auth/me",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id);
