@@ -404,7 +404,7 @@ app.get("/api/account/orders",async(q,r)=>{
 app.get("/api/admin/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return r.status(403).json({error:"Admin access required."});
- const gate=isSuperAdminUser(user)?{ok:true}:{await requireActiveSubscription(user.id,r)}; if(!gate.ok)return gate.response;
+ const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
  const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",configuredBrandId()).eq("source","website").order("created_at",{ascending:false}).limit(100);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
 });
