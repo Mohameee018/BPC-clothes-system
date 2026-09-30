@@ -184,11 +184,12 @@ async function getSubscriptionForUser(userId){
 function subscriptionView(sub){
   if(!sub)return {status:"none",active:false,warning:false};
   const expires=sub.expires_at?new Date(sub.expires_at):null;
-  const ms=expires?expires.getTime()-Date.now():0;
-  const daysLeft=expires?Math.ceil(ms/86400000):0;
-  const warning=sub.status==="active"&&daysLeft<=7;
+  const isLifetime=sub.subscription_plans?.code==="lifetime";
+  const ms=expires?expires.getTime()-Date.now():null;
+  const daysLeft=expires?Math.ceil(ms/86400000):null;
+  const warning=!isLifetime&&sub.status==="active"&&daysLeft!==null&&daysLeft<=7;
   return {
-    id:sub.id,status:sub.status,active:sub.status==="active"&&!!expires&&expires.getTime()>Date.now(),
+    id:sub.id,status:sub.status,active:sub.status==="active"&&(isLifetime||!!expires&&expires.getTime()>Date.now()),
     warning,days_left:daysLeft,starts_at:sub.starts_at||null,expires_at:sub.expires_at||null,
     plan:sub.subscription_plans||null
   };
