@@ -29,19 +29,19 @@ async function resolvePublicBrand(req){
  if(!supabase)return null;
  const requested=String(req.query?.brand||req.body?.brand_slug||"").trim().toLowerCase();
  if(requested){
-  const found=await supabase.from("brands").select("id,name,slug,active,website_url").eq("slug",requested).eq("active",true).maybeSingle();
+  const found=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("slug",requested).eq("active",true).maybeSingle();
   if(found.error)throw found.error;
   return found.data||null;
  }
  const host=String(req.headers?.host||"").split(":")[0].toLowerCase();
  const baseHost=(()=>{try{return new URL(process.env.PUBLIC_BASE_URL||"").hostname.toLowerCase()}catch{return ""}})();
  if(host&&(!baseHost||host!==baseHost)){
-  const brands=await supabase.from("brands").select("id,name,slug,active,website_url").eq("active",true).not("website_url","is",null).limit(500);
+  const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);
   if(brands.error)throw brands.error;
   const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});
   if(match)return match;
  }
- const fallback=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",configuredBrandId()).eq("active",true).maybeSingle();
+ const fallback=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",configuredBrandId()).eq("active",true).maybeSingle();
  if(fallback.error)throw fallback.error;
  return fallback.data||null;
 }
@@ -573,7 +573,7 @@ app.get("/api/desktop/update",async(q,r)=>{
  }
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
-app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim(),instapay:{address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim()}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
+app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const settings=brand.settings&&typeof brand.settings==="object"?brand.settings:{};r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,settings,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim(),instapay:{address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim()}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
 app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"customer-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),slug=String(q.body?.brand_slug||"").trim().toLowerCase();
@@ -601,7 +601,25 @@ async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!
 async function requireTenantAdmin(req,res){const user=await getAuthUser(req);if(!user)return res.status(401).json({error:"Sign in to continue."});const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return res.status(403).json({error:"Company administrator access required."});const brand=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",profile.brand_id).maybeSingle();if(brand.error)return res.status(503).json({error:"Could not verify company access."});if(!brand.data?.active)return res.status(403).json({error:"This company is inactive."});const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,res);if(!gate.ok)return gate.response;req.tenant={user,profile,brand:brand.data,brandId:String(profile.brand_id),subscription:gate.view};return null;}
 app.get("/api/app/session",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const profile=await ensureSubscriberWorkspace(q.tenant.user,q.tenant.profile);if(String(profile.brand_id)!==String(q.tenant.brandId)){const brand=await supabase.from("brands").select("id,name,slug,active,website_url").eq("id",profile.brand_id).maybeSingle();if(brand.data){q.tenant.profile=profile;q.tenant.brand=brand.data;q.tenant.brandId=String(profile.brand_id);}}r.json({user:{id:q.tenant.user.id,email:q.tenant.user.email||null},profile:q.tenant.profile,brand:q.tenant.brand});});
 app.get("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const b=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).maybeSingle();if(b.error)return r.status(500).json({error:"Could not load settings."});r.json({settings:b.data?.settings||{}});});
-app.patch("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const settings=q.body?.settings;if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","sidebarColor"];const clean={};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(settings,key))clean[key]=settings[key];const u=await supabase.from("brands").update({settings:clean,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings").single();if(u.error)return r.status(500).json({error:"Could not save settings."});r.json({settings:u.data.settings||{}});});
+app.patch("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const settings=q.body?.settings;if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","sidebarColor","storeMode","heroImageUrl","heroTitle","heroSubtitle","heroEyebrow","storyTitle","storyText","aboutText","instagramUrl","facebookUrl","whatsappUrl","tiktokUrl","contactEmail","customDomain","templateId"];const clean={};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(settings,key))clean[key]=settings[key];const u=await supabase.from("brands").update({settings:clean,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings").single();if(u.error)return r.status(500).json({error:"Could not save settings."});r.json({settings:u.data.settings||{}});});
+app.post("/api/app/store-asset",rateLimit({windowMs:60*1000,max:10,keyPrefix:"store-asset"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const kind=String(q.body?.kind||"").trim(),encoded=String(q.body?.data_base64||"").trim();
+ if(!["logo","hero"].includes(kind)||!encoded)return r.status(400).json({error:"Store asset kind and image are required."});
+ const bytes=Buffer.from(encoded,"base64");if(!bytes.length||bytes.length>3145728)return r.status(413).json({error:"Store image must be smaller than 3 MB."});
+ const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Use a valid JPG, PNG, GIF or WebP image."});
+ const storagePath="brands/"+safeFileName(q.tenant.brandId)+"/store/"+kind;
+ const uploaded=await supabase.storage.from("product-images").upload(storagePath,bytes,{contentType:detected.mime,upsert:true});
+ if(uploaded.error)return r.status(500).json({error:"Could not upload store image."});
+ const url=supabase.storage.from("product-images").getPublicUrl(storagePath).data.publicUrl;
+ const key=kind==="logo"?"logoUrl":"heroImageUrl";
+ const current=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).single();
+ if(current.error)return r.status(500).json({error:"Could not load store settings."});
+ const settings={...(current.data?.settings||{}),[key]:url};
+ const saved=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings").single();
+ if(saved.error)return r.status(500).json({error:"Image uploaded but could not save store settings."});
+ r.status(201).json({url,settings:saved.data.settings||{}});
+});
 app.post("/api/app/product-image",rateLimit({windowMs:60*1000,max:20,keyPrefix:"product-image"}),async(q,r)=>{
  const denied=await requireTenantAdmin(q,r);if(denied)return denied;
  const productId=String(q.body?.product_id||"").trim(),encoded=String(q.body?.data_base64||"").trim();
