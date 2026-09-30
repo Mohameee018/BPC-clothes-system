@@ -168,28 +168,6 @@ button,input{font:inherit}
 
 <script>
 (async()=>{
-  const canvas=document.getElementById("hero-3d"); if(!canvas||!window.THREE)return;
-  const T=window.THREE, scene=new T.Scene(), camera=new T.PerspectiveCamera(30,1,.1,100); camera.position.set(0,.5,17);
-  const renderer=new T.WebGLRenderer({canvas,alpha:true,antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
-  scene.add(new T.HemisphereLight(0xffffff,0x06351b,1)); const dl=new T.DirectionalLight(0xffffff,1.2); dl.position.set(3,6,7); scene.add(dl);
-  const mat=c=>new T.MeshStandardMaterial({color:c,roughness:.72});
-  const green=mat(0x20b866), lightGreen=mat(0x8ef0b5), skin=mat(0xf1c7a4), white=mat(0xffffff), dark=mat(0x092012), hair=mat(0x163d27);
-  const box=(w,h,d,m,x,y,z,p)=>{const q=new T.Mesh(new T.BoxGeometry(w,h,d),m);q.position.set(x,y,z);p.add(q);return q};
-  const root=new T.Group();scene.add(root),body=new T.Group();root.add(body);
-  box(3,2.5,1.7,green,0,-1.5,0,body); box(1.1,.35,1.1,white,0,-.2,0,body); box(.8,.6,.8,skin,0,.15,0,body);
-  // arms + the T-shirt held in the character's hand
-  box(.55,2.05,1.0,green,-1.72,-1.55,.02,body).rotation.z=-.16; box(.55,2.05,1.0,green,1.72,-1.55,.02,body).rotation.z=.16;
-  const hand=box(.38,.38,.48,skin,2.02,-2.35,.05,body);
-  const shirt=new T.Group(); shirt.position.set(2.48,-2.18,.1); shirt.rotation.z=-.08; body.add(shirt);
-  box(1.15,.9,.18,lightGreen,0,0,0,shirt); box(.4,.55,.2,lightGreen,-.72,.18,0,shirt); box(.4,.55,.2,lightGreen,.72,.18,0,shirt); box(.25,.22,.22,dark,0,.08,.12,shirt);
-  const head=new T.Group();head.position.set(0,1.55,0);body.add(head);
-  box(2.3,2.5,2.1,skin,0,0,0,head); box(2.42,.7,2.22,hair,0,1.3,-.02,head); box(.25,1.4,2,hair,-1.16,.6,-.05,head);box(.25,1.4,2,hair,1.16,.6,-.05,head);
-  box(.45,.6,.55,skin,0,-.1,1.15,head); const pupils=[];[-.58,.58].forEach(x=>{box(.66,.44,.1,white,x,.3,1.06,head);const p=box(.24,.34,.1,dark,x,.3,1.13,head);p.userData.bx=x;pupils.push(p)}); box(1.9,.85,.3,hair,0,-.85,.98,head);box(1,.22,.28,hair,0,-.38,1.1,head);
-  const core=new T.Group();core.position.set(3,2.3,0);root.add(core);const cm=new T.Mesh(new T.BoxGeometry(.9,.9,.9),green);core.add(cm);core.add(new T.LineSegments(new T.EdgesGeometry(new T.BoxGeometry(.98,.98,.98)),new T.LineBasicMaterial({color:0x8ef0b5})));const sats=[];for(let i=0;i<4;i++){const s=new T.Mesh(new T.BoxGeometry(.3,.3,.3),i%2?white:dark);s.userData.a=i*Math.PI/2;core.add(s);sats.push(s)}
-  let mx=innerWidth/2,my=innerHeight/2,hx=0,hy=0; addEventListener("pointermove",e=>{mx=e.clientX;my=e.clientY},{passive:true});
-  function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();const a=w/h;root.position.set(a>1.15?a*1.45:0,-.55,0);root.scale.setScalar(a>1.15?.76:Math.min(.62,a*.8))} resize();addEventListener("resize",resize,{passive:true});
-  const clock=new T.Clock();function render(){const t=clock.getElapsedTime();const tx=Math.max(-1,Math.min(1,(mx-innerWidth*.52)/(innerWidth*.45))),ty=Math.max(-1,Math.min(1,(my-innerHeight*.48)/(innerHeight*.45)));hx+=(tx-hx)*.08;hy+=(ty-hy)*.08;head.rotation.y=hx*.7;head.rotation.x=hy*.4;body.rotation.y=hx*.16;body.position.y=Math.sin(t*1.4)*.08;cm.rotation.y=t*.6;cm.rotation.x=t*.3;sats.forEach(s=>{const a=s.userData.a+t*.9;s.position.set(Math.cos(a)*1.1,Math.sin(a*.5)*.3,Math.sin(a)*1.1);s.rotation.y=t});renderer.render(scene,camera);requestAnimationFrame(render)} render();
-(async()=>{
   const support=document.querySelector("#supportLink");
   const cfg=await fetch("/api/public-config").then(r=>r.ok?r.json():{}).catch(()=>({}));
   const wa=String(cfg.supportWhatsApp||"").replace(/\D/g,"")||"201080910753";
