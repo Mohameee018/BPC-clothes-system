@@ -433,6 +433,48 @@ app.get("/api/admin/orders",async(q,r)=>{
  const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).limit(500);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
 });
+app.post("/api/app/orders",rateLimit({windowMs:5*60*1000,max:30,keyPrefix:"tenant-admin-orders"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const brandId=q.tenant.brandId,{customer,items}=q.body||{};
+ if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Customer name, phone, address and at least one product are required."});
+ if(items.length>50||items.some(i=>!i?.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order items."});
+ const productIds=[...new Set(items.map(i=>String(i.product_id)))],variantIds=[...new Set(items.map(i=>String(i.variant_id||"")).filter(Boolean))];
+ const products=await supabase.from("products").select("id,name,price,cost_price,stock,active").eq("brand_id",brandId).in("id",productIds);
+ if(products.error)return r.status(500).json({error:"Could not load products."});
+ const variants=variantIds.length?await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds):{data:[],error:null};
+ if(variants.error)return r.status(500).json({error:"Could not load product variants."});
+ const pm=new Map((products.data||[]).map(p=>[p.id,p])),vm=new Map((variants.data||[]).map(v=>[v.id,v]));
+ let subtotal=0;const clean=[];
+ for(const item of items){
+  const p=pm.get(String(item.product_id)),qty=Number(item.quantity),v=item.variant_id?vm.get(String(item.variant_id)):null;
+  if(!p||!p.active||!Number.isSafeInteger(qty)||qty<1||qty>100||item.variant_id&&(!v||v.product_id!==p.id||!v.active))return r.status(409).json({error:"A selected product or variant is unavailable."});
+  subtotal+=Number(p.price||0)*qty;
+  clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:qty,unit_price:Number(p.price||0),cost_price:Number(p.cost_price||0),size:v?.size||item.size||null,color:v?.color||item.color||null});
+ }
+ const shipping=Number(q.body?.shipping_amount||0),discount=Number(q.body?.discount||0);
+ if(!Number.isFinite(shipping)||shipping<0||!Number.isFinite(discount)||discount<0||discount>subtotal+shipping)return r.status(400).json({error:"Invalid shipping or discount amount."});
+ const total=subtotal+shipping-discount;
+ const phone=String(customer.phone).trim();
+ let customerId=null;
+ const existing=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
+ if(existing.error)return r.status(500).json({error:"Could not look up customer."});
+ const customerPatch={name:String(customer.name).trim(),phone,email:String(customer.email||"").trim()||null,city:String(customer.city||"").trim()||null,address:String(customer.address).trim(),updated_at:new Date().toISOString()};
+ if(existing.data?.id){
+  const cu=await supabase.from("customers").update(customerPatch).eq("id",existing.data.id).eq("brand_id",brandId).select("id").single();
+  if(cu.error)return r.status(500).json({error:"Could not update customer."});customerId=cu.data.id;
+ }else{
+  const cu=await supabase.from("customers").insert({...customerPatch,brand_id:brandId}).select("id").single();
+  if(cu.error)return r.status(500).json({error:"Could not create customer."});customerId=cu.data.id;
+ }
+ const reservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
+ const reserved=await supabase.rpc("reserve_stock_items",{p_items:reservation});
+ if(reserved.error)return r.status(409).json({error:"Not enough stock for this order."});
+ const order=await supabase.from("orders").insert({brand_id:brandId,customer_id:customerId,customer_name:customerPatch.name,customer_phone:phone,customer_email:customerPatch.email,city:customerPatch.city,address:customerPatch.address,notes:String(customer.notes||"").trim()||null,payment_method:"cod",payment_status:"pending",order_status:"Not Prepared",delivery_status:"Pending",total_amount:total,discount,shipping_amount:shipping,source:"website",stock_reserved:true}).select("id").single();
+ if(order.error){await supabase.rpc("release_stock_items",{p_items:reservation});return r.status(500).json({error:"Could not create order."});}
+ const inserted=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.data.id,brand_id:brandId})));
+ if(inserted.error){await supabase.rpc("release_stock_items",{p_items:reservation});await supabase.from("orders").delete().eq("id",order.data.id).eq("brand_id",brandId);return r.status(500).json({error:"Could not save order items."});}
+ r.status(201).json({ok:true,order_id:order.data.id,total_amount:total});
+});
 app.post("/api/app/orders/return",async(q,r)=>{
  const denied=await requireTenantAdmin(q,r);if(denied)return denied;
  const {order_id,reason,disposition,amount,loss}=q.body||{};
@@ -477,7 +519,7 @@ const SYSTEM_TABLES={
   inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at"],
   customers:["id","auth_user_id","desktop_id","name","email","phone","additional_phone","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
   orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","delivery_status","total_amount","discount","source","shipping_amount","stock_reserved","created_at","updated_at"],
-  order_items:["id","order_id","product_id","product_name","quantity","unit_price","size","color","variant_id","desktop_id","brand_id"],
+  order_items:["id","order_id","product_id","product_name","quantity","unit_price","cost_price","size","color","variant_id","desktop_id","brand_id"],
   returns:["id","desktop_id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss","created_at","processed_at","notes"],
   expenses:["id","desktop_id","amount","category","description","payment_method","status","expense_date","created_at","updated_at"]
 };
@@ -592,10 +634,10 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
   const fields=[["name",customer.name,120],["phone",customer.phone,40],["address",customer.address,500],["city",customer.city,100],["email",customer.email,254],["notes",customer.notes,1000]];
   if(fields.some(([_,v,max])=>v!==undefined&&String(v).length>max))return r.status(400).json({error:"One or more order fields are too long."});
   if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
- const {data:products,error:pe}=await supabase.from("products").select("id,name,price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:"Could not load products."});
+ const {data:products,error:pe}=await supabase.from("products").select("id,name,price,cost_price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:"Could not load products."});
  const variantIds=items.map(i=>i.variant_id).filter(Boolean);let variants=[];if(variantIds.length){const vr=await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds);if(vr.error)return r.status(500).json({error:"Internal server error."});variants=vr.data||[]}
  const map=new Map((products||[]).map(p=>[p.id,p])),vmap=new Map(variants.map(v=>[v.id,v]));let total=0;const clean=[];
- for(const item of items){const rawQty=Number(item.quantity);if(!Number.isSafeInteger(rawQty)||rawQty<1||rawQty>100)return r.status(400).json({error:"Invalid quantity."});const p=map.get(item.product_id),n=rawQty,v=item.variant_id?vmap.get(item.variant_id):null;if(!p||!p.active||(!v&&n>p.stock)|| (v&&(!v.active||v.product_id!==p.id||n>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,size:v?.size||item.size||null,color:v?.color||item.color||null})}
+ for(const item of items){const rawQty=Number(item.quantity);if(!Number.isSafeInteger(rawQty)||rawQty<1||rawQty>100)return r.status(400).json({error:"Invalid quantity."});const p=map.get(item.product_id),n=rawQty,v=item.variant_id?vmap.get(item.variant_id):null;if(!p||!p.active||(!v&&n>p.stock)|| (v&&(!v.active||v.product_id!==p.id||n>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,cost_price:Number(p.cost_price||0),size:v?.size||item.size||null,color:v?.color||item.color||null})}
  const stockReservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
  const authUser=await getAuthUser(q);let customerId=null;
  if(authUser){
