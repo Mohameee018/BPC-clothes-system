@@ -277,7 +277,7 @@ app.post("/api/admin/orders/status",async(q,r)=>{
 });
 
 /* BPC system API — tenant-scoped management surface. */
-const SYSTEM_TABLES={
+app.use("/api/system",rateLimit({windowMs:60*1000,max:120,keyPrefix:"system-api"}));\nconst SYSTEM_TABLES={
   products:["id","desktop_id","sku","name","category","description","image_path","price","cost_price","stock","minimum_stock","active","is_active","created_at","updated_at"],
   product_variants:["id","product_id","desktop_variant_id","sku","size","color","stock","active","created_at","updated_at"],
   warehouses:["id","desktop_id","name","location","active","created_at","updated_at"],
