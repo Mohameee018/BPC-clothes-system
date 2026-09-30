@@ -46,6 +46,28 @@ app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPref
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
   const p=q.body?.product;
   if(!p?.desktop_id||!p?.name)return r.status(400).json({error:"product.desktop_id and product.name are required."});
+
+  // Validate every nested payload before the first database/storage mutation.
+  // This prevents malformed variants/images from leaving an avoidable partial sync.
+  const variants=Array.isArray(p.variants)?p.variants:[];
+  const variantIds=new Set();
+  for(const v of variants){
+    const variantId=String(v?.desktop_variant_id||v?.id||"").trim();
+    const variantStock=Number(v?.stock??0);
+    if(!variantId||variantIds.has(variantId)||!Number.isSafeInteger(variantStock)||variantStock<0)
+      return r.status(400).json({error:"Invalid or duplicate variant ID/stock."});
+    variantIds.add(variantId);
+  }
+  const images=Array.isArray(p.images)?p.images.slice(0,50):[];
+  const preparedImages=[];
+  for(const img of images){
+    if(!img?.data_base64)continue;
+    const bytes=Buffer.from(String(img.data_base64),"base64");
+    if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
+    const detected=detectImage(bytes);
+    if(!detected)return r.status(415).json({error:"Unsupported product image type."});
+    preparedImages.push({img,bytes,detected});
+  }
   const price=Number(p.price||0),costPrice=Number(p.cost_price||0),stock=Number(p.stock||0),minimumStock=Number(p.minimum_stock||0);
   if(!Number.isFinite(price)||price<0||!Number.isFinite(costPrice)||costPrice<0||!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(minimumStock)||minimumStock<0)return r.status(400).json({error:"Invalid product pricing or stock."});
   const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
@@ -56,22 +78,19 @@ app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPref
   if(warehouse.error)return r.status(500).json({error:"Internal server error."});
   if(!warehouse.data){const createdWarehouse=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(createdWarehouse.error)return r.status(500).json({error:"Internal server error."});warehouse={data:createdWarehouse.data};}
   const warehouseId=warehouse.data.id;
-  const variants=Array.isArray(p.variants)?p.variants:[];
-  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"brand_id,desktop_variant_id"});if(vu.error)return r.status(500).json({error:"Internal server error."});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:"Internal server error."});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:"Internal server error."});}
+  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id).trim(),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Number(v.stock??0),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"brand_id,desktop_variant_id"});if(vu.error)return r.status(500).json({error:"Internal server error."});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:"Internal server error."});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:"Internal server error."});}
   const inv=await supabase.from("inventory").select("id").eq("brand_id",q.brandId).eq("product_id",productId).eq("warehouse_id",warehouseId).is("variant_id",null).maybeSingle();
   if(inv.error)return r.status(500).json({error:"Internal server error."});
   if(inv.data){const iu=await supabase.from("inventory").update({quantity:stock,updated_at:new Date().toISOString()}).eq("id",inv.data.id);if(iu.error)return r.status(500).json({error:"Internal server error."});}
   else{const ii=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:productId,warehouse_id:warehouseId,quantity:stock});if(ii.error)return r.status(500).json({error:"Internal server error."});}
-  const images=Array.isArray(p.images)?p.images.slice(0,50):[];
   if(images.length || p.images){
     const old=await supabase.from("product_images").select("storage_path").eq("brand_id",q.brandId).eq("product_id",productId);
-    if(old.data?.length)await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));
-    await supabase.from("product_images").delete().eq("brand_id",q.brandId).eq("product_id",productId);
+    if(old.error)return r.status(500).json({error:"Could not prepare product images."});
+    if(old.data?.length){const removed=await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));if(removed.error)return r.status(500).json({error:"Could not prepare product images."});}
+    const deleted=await supabase.from("product_images").delete().eq("brand_id",q.brandId).eq("product_id",productId);
+    if(deleted.error)return r.status(500).json({error:"Could not prepare product images."});
     const imageRows=[];
-    for(const img of images){
-      if(!img.data_base64)continue;
-      const bytes=Buffer.from(String(img.data_base64),"base64");if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
-      const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Unsupported product image type."});
+    for(const {img,bytes,detected} of preparedImages){
       const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
       const path="brands/"+safeFileName(q.brandId)+"/desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
       const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:true});
