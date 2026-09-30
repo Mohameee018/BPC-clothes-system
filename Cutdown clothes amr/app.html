@@ -23,6 +23,11 @@
     <div class="field"><label>Password</label><input id="password" type="password" autocomplete="current-password" required></div>
     <div id="loginError" class="error"></div>
     <button class="btn primary" style="width:100%">Sign in</button>
+    <div style="margin-top:14px;text-align:center">
+      <a href="/plans.html" class="muted">View subscription plans</a>
+      <span class="muted"> · </span>
+      <a href="/signup.html" class="muted">I already paid — create my account</a>
+    </div>
   </form>
 </section>
 <section id="app" class="app hidden">
@@ -32,7 +37,8 @@
   <div class="side-foot"><span id="userName">Administrator</span><br><button id="logout" class="btn" style="margin-top:10px;width:100%">Sign out</button></div>
 </aside>
 <div class="main">
-  <header class="top"><h1 id="pageTitle">Dashboard</h1><span class="muted">BPC Management</span></header>
+  <header class="top"><h1 id="pageTitle">Dashboard</h1><div style="text-align:right"><span class="muted">BPC Management</span><div id="subscriptionBadge"></div></div></header>
+  <div id="subscriptionWarning" class="hidden" style="margin:14px 18px 0;padding:14px 16px;border:1px solid rgba(255,180,0,.35);border-radius:12px;background:rgba(255,180,0,.08)"></div>
   <nav id="mobileNav" class="mobile-nav"></nav>
   <main id="content" class="content"></main>
 </div>
@@ -46,6 +52,15 @@ function headers(){return {"Content-Type":"application/json",Authorization:"Bear
 async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(r.status===401||r.status===403){if(token){sessionStorage.removeItem("bpc_admin_token");token="";showLogin()}throw Error(d.error||"Session expired.")}if(!r.ok)throw Error(d.error||"Request failed.");return d}
 function showLogin(){$("#login").classList.remove("hidden");$("#app").classList.add("hidden")}
 function showApp(){$("#login").classList.add("hidden");$("#app").classList.remove("hidden")}
+function renderSubscription(sub){
+  const el=$("#subscriptionBadge"),warn=$("#subscriptionWarning");
+  if(!sub){el.innerHTML="";warn.classList.add("hidden");return}
+  const date=sub.expires_at?new Date(sub.expires_at).toLocaleString("ar-EG",{dateStyle:"medium",timeStyle:"short"}):"—";
+  const plan=sub.plan?.name||"Subscription";
+  el.innerHTML='<div style="font-size:12px;margin-top:4px">'+esc(plan)+" · expires "+esc(date)+"</div>";
+  if(sub.warning){warn.classList.remove("hidden");warn.innerHTML="⚠️ اشتراكك قرب يخلص — تاريخ الانتهاء: <b>"+esc(date)+"</b> ("+Number(sub.days_left||0)+" يوم متبقي). بياناتك ستظل محفوظة ويمكنك التجديد قبل أو بعد الانتهاء."}
+  else warn.classList.add("hidden");
+}
 function nav(){const h=navItems.map(([id,n])=>'<button data-nav="'+id+'">'+n+"</button>").join("");$("#nav").innerHTML=h;$("#mobileNav").innerHTML=h;document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>go(b.dataset.nav))}
 function go(page){current=page;document.querySelectorAll("[data-nav]").forEach(b=>b.classList.toggle("active",b.dataset.nav===page));$("#pageTitle").textContent=navItems.find(x=>x[0]===page)?.[1]||"Dashboard";render()}
 function money(v){return "EGP "+Number(v||0).toLocaleString("en-EG",{maximumFractionDigits:2})}
@@ -113,10 +128,10 @@ async function reports(c){
  c.innerHTML='<div class="cards"><div class="card"><div class="muted">Net sales</div><div class="num">'+money(sales)+'</div></div><div class="card"><div class="muted">Expenses</div><div class="num">'+money(ex)+'</div></div><div class="card"><div class="muted">Orders</div><div class="num">'+valid.length+'</div></div><div class="card"><div class="muted">Sales minus expenses</div><div class="num">'+money(sales-ex)+'</div></div></div><div class="panel" style="margin-top:16px"><h2>Report basis</h2><p class="muted">Cancelled orders are excluded from sales, matching the desktop reporting rule. Cost-of-goods and return reconciliation will use stored order-item snapshots as the migration is completed.</p></div>';
 }
 function settings(c){c.innerHTML='<div class="grid2"><div class="panel"><h2>Account</h2><p>'+esc(profile?.name||"Administrator")+'</p><p class="muted">'+esc(profile?.email||"")+'</p></div><div class="panel"><h2>Security</h2><p class="muted">Tenant scope is derived server-side from the authenticated administrator profile. The browser never receives the service-role key.</p><button class="btn danger" id="logout2">Sign out</button></div></div>';$("#logout2").onclick=logout}
-async function logout(){sessionStorage.removeItem("bpc_admin_token");token="";profile=null;showLogin()}
+async function logout(){sessionStorage.removeItem("bpc_admin_token");sessionStorage.removeItem("bpc_subscription");token="";profile=null;showLogin()}
 $("#logout").onclick=logout;
-$("#loginForm").onsubmit=async e=>{e.preventDefault();$("#loginError").textContent="";try{const d=await fetch("/api/desktop/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("#email").value.trim(),password:$("#password").value})}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw Error(x.error||"Sign in failed.");return x});token=d.access_token;profile=d.profile;sessionStorage.setItem("bpc_admin_token",token);$("#userName").textContent=profile?.name||profile?.email||"Administrator";showApp();nav();go("dashboard")}catch(e){$("#loginError").textContent=e.message}};
-(async()=>{nav();if(!token){showLogin();return}try{const d=await api("/api/auth/me");profile=d.profile||{};$("#userName").textContent=profile.name||profile.email||"Administrator";showApp();go("dashboard")}catch{showLogin()}})();
+$("#loginForm").onsubmit=async e=>{e.preventDefault();$("#loginError").textContent="";try{const d=await fetch("/api/desktop/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:$("#email").value.trim(),password:$("#password").value})}).then(async r=>{const x=await r.json().catch(()=>({}));if(!r.ok)throw Error(x.error||"Sign in failed.");return x});token=d.access_token;profile=d.profile;sessionStorage.setItem("bpc_admin_token",token);sessionStorage.setItem("bpc_subscription",JSON.stringify(d.subscription||null));$("#userName").textContent=profile?.name||profile?.email||"Administrator";showApp();nav();renderSubscription(d.subscription);go("dashboard")}catch(e){$("#loginError").textContent=e.message}};
+(async()=>{nav();if(!token){showLogin();return}try{const d=await api("/api/auth/me");profile=d.profile||{};sessionStorage.setItem("bpc_subscription",JSON.stringify(d.subscription||null));$("#userName").textContent=profile.name||profile.email||"Administrator";showApp();renderSubscription(d.subscription);go("dashboard")}catch{showLogin()}})();
 </script>
 </body>
 </html>
