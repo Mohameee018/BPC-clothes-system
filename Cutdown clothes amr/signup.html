@@ -36,7 +36,7 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 .signup-form button{border:0;border-radius:14px;padding:14px;background:#39c979;color:#062617;font-weight:600;cursor:pointer}
 .signup-form button:hover{background:#8ee9b1}
 .signup-form button:disabled{opacity:.55;cursor:not-allowed}
-.payment-choice{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:4px 0}
+.payment-choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0}
 .payment-choice label{padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.04);cursor:pointer;font-size:12px}
 .payment-choice label:has(input:checked){border-color:#39c979;background:rgba(57,201,121,.1)}
 .payment-choice input{width:auto;margin-left:6px}
@@ -97,7 +97,7 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
     <input name="password" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" minlength="8" required>
     <div class="payment-choice" aria-label="طريقة الدفع">
       <label><input type="radio" name="payment_method" value="paymob" checked> Visa / Mastercard</label>
-      <label><input type="radio" name="payment_method" value="instapay"> InstaPay</label>
+      <label><input type="radio" name="payment_method" value="instapay"> InstaPay</label><label><input type="radio" name="payment_method" value="vodafone_cash"> Vodafone Cash</label>
     </div>
     <button type="submit">إنشاء الحساب والمتابعة ←</button>
     <div id="instapayBox" class="instapay-box"></div>
@@ -128,18 +128,12 @@ f.onsubmit=async e=>{
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
     if(d.session)sessionStorage.setItem("bpc_signup_token",d.session.access_token);
-    if(d.payment?.method==="instapay"){
+    if(d.payment?.method==="instapay"||d.payment?.method==="vodafone_cash"){
       f.style.display="none";instapayBox.classList.add("show");
-      const i=d.payment.instructions||{};
-      instapayBox.innerHTML='<strong style="color:#8ee9b1">حوّل المبلغ ثم أرسل رقم العملية</strong><p style="color:rgba(247,251,248,.62);font-size:12px;line-height:1.7">بعد التحويل، اكتب رقم العملية هنا. لن يتم تفعيل الحساب إلا بعد مراجعة التحويل يدويًا.</p>'+
-        '<div class="instapay-row"><span>InstaPay</span><b>'+esc(i.address||"—")+'</b></div>'+
-        '<div class="instapay-row"><span>الاسم</span><b>'+esc(i.name||"—")+'</b></div>'+
-        '<div class="instapay-row"><span>البنك</span><b>'+esc(i.bank||"—")+'</b></div>'+
-        '<div class="instapay-row"><span>رقم الحساب</span><b>'+esc(i.account||"—")+'</b></div>'+
-        '<div class="instapay-row"><span>المبلغ</span><b>'+Number(i.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})+" "+esc(i.currency||"USD")+'</b></div>'+
-        '<form id="instapaySubmit" class="instapay-form"><input name="reference" placeholder="رقم/مرجع عملية InstaPay" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button type="submit">إرسال إثبات التحويل</button></form>';
-      document.querySelector("#instapaySubmit").onsubmit=async ev=>{
-        ev.preventDefault();const b=Object.fromEntries(new FormData(ev.currentTarget).entries());const rr=await fetch("/api/subscription/instapay-reference",{method:"POST",headers:{Authorization:"Bearer "+(d.session?.access_token||sessionStorage.getItem("bpc_signup_token")||""),"Content-Type":"application/json"},body:JSON.stringify(b)});const dd=await rr.json().catch(()=>({}));
+      const i=d.payment.instructions||{}; const isVodafone=d.payment.method==="vodafone_cash"; const label=isVodafone?"Vodafone Cash":"InstaPay";
+      instapayBox.innerHTML='<strong style="color:#8ee9b1">حوّل المبلغ ثم أرسل رقم العملية</strong><p style="color:rgba(247,251,248,.62);font-size:12px;line-height:1.7">بعد التحويل، اكتب رقم العملية هنا. لن يتم تفعيل الحساب إلا بعد مراجعة التحويل يدويًا.</p>'+(isVodafone?'<div class="instapay-row"><span>Vodafone Cash</span><b>'+esc(i.number||"—")+'</b></div><div class="instapay-row"><span>الاسم</span><b>'+esc(i.name||"—")+'</b></div>':'<div class="instapay-row"><span>InstaPay</span><b>'+esc(i.address||"—")+'</b></div><div class="instapay-row"><span>الاسم</span><b>'+esc(i.name||"—")+'</b></div><div class="instapay-row"><span>البنك</span><b>'+esc(i.bank||"—")+'</b></div><div class="instapay-row"><span>رقم الحساب</span><b>'+esc(i.account||"—")+'</b></div>')+'<div class="instapay-row"><span>المبلغ</span><b>'+Number(i.amount||0).toLocaleString("en-US",{minimumFractionDigits:2})+" "+esc(i.currency||"EGP")+'</b></div><form id="manualSubmit" class="instapay-form"><input name="reference" placeholder="رقم/مرجع عملية '+label+'" maxlength="120" required><input name="notes" placeholder="ملاحظة اختيارية" maxlength="500"><button type="submit">إرسال إثبات التحويل</button></form>';
+      document.querySelector("#manualSubmit").onsubmit=async ev=>{
+        ev.preventDefault();const b=Object.fromEntries(new FormData(ev.currentTarget).entries());const rr=await fetch("/api/subscription/manual-transfer-reference",{method:"POST",headers:{Authorization:"Bearer "+(d.session?.access_token||sessionStorage.getItem("bpc_signup_token")||""),"Content-Type":"application/json"},body:JSON.stringify({...b,payment_method:d.payment.method})});const dd=await rr.json().catch(()=>({}));
         if(!rr.ok){msg.textContent=dd.error||"تعذر إرسال المرجع.";msg.style.color="#ffb4b4";return}
         msg.textContent="تم إرسال التحويل للمراجعة. بعد تأكيد الدفع من الإدارة هيتفعل حسابك.";msg.style.color="#8ee9b1";
       };
