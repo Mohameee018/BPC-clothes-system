@@ -38,7 +38,7 @@ const mainNav=[["dashboard","Dashboard"],["products","Products"],["inventory","I
 const managementNav=[["returns","Returns"],["expenses","Expenses"],["reports","Reports"],["settings","Settings"]];
 const navItems=[...mainNav,...managementNav];
 function headers(){return {"Content-Type":"application/json",Authorization:"Bearer "+token}}
-function storefrontUrl(){if(!tenantBrand?.slug&&!tenantBrand?.website_url)return "#";if(tenantBrand?.website_url){try{const u=new URL(tenantBrand.website_url,location.origin);if(tenantBrand.slug)u.searchParams.set("brand",tenantBrand.slug);return u.toString()}catch{return "#"}}return "/store?brand="+encodeURIComponent(tenantBrand.slug)}
+function storefrontUrl(){const slug=String(tenantBrand?.slug||"").trim();const settings=tenantBrand?.settings&&typeof tenantBrand.settings==="object"?tenantBrand.settings:{};const website=String(tenantBrand?.website_url||settings.websiteUrl||"").trim();const useExternal=settings.storeMode==="external"&&website;if(useExternal){try{const u=new URL(website,location.origin);if(!["https:","http:"].includes(u.protocol))return "#";if(slug)u.searchParams.set("brand",slug);return u.toString()}catch{return "#"}}return slug?"/store?brand="+encodeURIComponent(slug):"#"}
 function syncStorefrontLink(){const el=$("#storefrontTopLink");if(!el)return;const url=storefrontUrl();el.href=url;el.classList.toggle("hidden",url==="#");el.title=tenantBrand?.name?`فتح متجر ${tenantBrand.name}`:"فتح المتجر"}
 async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(r.status===401||r.status===403){if(token){sessionStorage.removeItem("bpc_admin_token");token="";showLogin()}throw Error(d.error||"Session expired.")}if(!r.ok)throw Error(d.error||"Request failed.");return d}
 function showLogin(){$("#login").classList.remove("hidden");$("#app").classList.add("hidden")}
@@ -144,7 +144,7 @@ async function settings(c){
    const upload=async(id,kind)=>{const f=$(id).files?.[0];if(!f)return;const data=await new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(String(rd.result).split(",")[1]||"");rd.onerror=rej;rd.readAsDataURL(f)});const d=await api("/api/app/store-asset",{method:"POST",body:JSON.stringify({kind,data_base64:data})});if(kind==="logo")settings.logoUrl=d.url;else settings.heroImageUrl=d.url};
    await upload("#logoFile","logo");await upload("#heroFile","hero");
    alert("Store settings saved. افتح المتجر لمشاهدة التغييرات.");
-   const ss=saved||await api("/api/app/settings"); tenantBrand={...(tenantBrand||{}),settings:ss.settings||settings,website_url:ss.website_url||null}; syncStorefrontLink();
+   const ss=saved||await api("/api/app/settings"); tenantBrand={...(tenantBrand||{}),settings:ss.settings||settings,website_url:ss.website_url??(settings.storeMode==="external"?settings.websiteUrl||null:null)}; syncStorefrontLink();
   }catch(e){alert(e.message)}
  };
 }
