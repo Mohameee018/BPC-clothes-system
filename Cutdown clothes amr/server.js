@@ -138,7 +138,7 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
  if(result.error){
    const msg=String(result.error.message||"");
    if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
-   if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."}); if(msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Invalid refund amount."}); if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
+   if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."}); if(msg.includes("INVALID_RETURN_REFUND_AMOUNT")||msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Refund amount must not exceed the order total."}); if(msg.includes("RETURN_REASON_DISPOSITION_MISMATCH"))return r.status(400).json({error:"The selected return reason requires a different stock disposition."}); if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
    if(msg.includes("ORDER_NOT_CONFIRMED"))return r.status(409).json({error:"Order is not confirmed for return."});
    if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
    return r.status(500).json({error:"Could not process return."});
