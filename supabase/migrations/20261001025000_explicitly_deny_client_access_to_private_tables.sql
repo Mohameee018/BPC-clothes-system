@@ -1,0 +1,10 @@
+begin;
+drop policy if exists "deny client access to subscriptions" on public.subscriptions;
+create policy "deny client access to subscriptions" on public.subscriptions for all to anon, authenticated using (false) with check (false);
+drop policy if exists "deny client access to subscription payments" on public.subscription_payments;
+create policy "deny client access to subscription payments" on public.subscription_payments for all to anon, authenticated using (false) with check (false);
+drop policy if exists "deny client access to subscription plans" on public.subscription_plans;
+create policy "deny client access to subscription plans" on public.subscription_plans for all to anon, authenticated using (false) with check (false);
+drop policy if exists "deny client access to desktop update manifests" on public.desktop_update_manifests;
+create policy "deny client access to desktop update manifests" on public.desktop_update_manifests for all to anon, authenticated using (false) with check (false);
+commit;
