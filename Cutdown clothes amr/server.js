@@ -90,37 +90,33 @@ app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPref
   }
   const price=Number(p.price||0),costPrice=Number(p.cost_price||0),stock=Number(p.stock||0),minimumStock=Number(p.minimum_stock||0);
   if(!Number.isFinite(price)||price<0||!Number.isFinite(costPrice)||costPrice<0||!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(minimumStock)||minimumStock<0)return r.status(400).json({error:"Invalid product pricing or stock."});
-  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
-  const up=await supabase.from("products").upsert(productRow,{onConflict:"brand_id,desktop_id"}).select().single();
-  if(up.error)return r.status(500).json({error:"Internal server error."});
-  const productId=up.data.id;
+  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_url:/^https?:\/\//i.test(String(p.image_url||""))?String(p.image_url):"",price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
   let warehouse=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();
-  if(warehouse.error)return r.status(500).json({error:"Internal server error."});
-  if(!warehouse.data){const createdWarehouse=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(createdWarehouse.error)return r.status(500).json({error:"Internal server error."});warehouse={data:createdWarehouse.data};}
+  if(warehouse.error)return r.status(500).json({error:"Could not load the store warehouse."});
+  if(!warehouse.data){const createdWarehouse=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(createdWarehouse.error)return r.status(500).json({error:"Could not create the store warehouse."});warehouse={data:createdWarehouse.data};}
   const warehouseId=warehouse.data.id;
-  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id).trim(),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Number(v.stock??0),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"brand_id,desktop_variant_id"});if(vu.error)return r.status(500).json({error:"Internal server error."});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:"Internal server error."});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:"Internal server error."});}
-  const inv=await supabase.from("inventory").select("id").eq("brand_id",q.brandId).eq("product_id",productId).eq("warehouse_id",warehouseId).is("variant_id",null).maybeSingle();
-  if(inv.error)return r.status(500).json({error:"Internal server error."});
-  if(inv.data){const iu=await supabase.from("inventory").update({quantity:stock,updated_at:new Date().toISOString()}).eq("id",inv.data.id);if(iu.error)return r.status(500).json({error:"Internal server error."});}
-  else{const ii=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:productId,warehouse_id:warehouseId,quantity:stock});if(ii.error)return r.status(500).json({error:"Internal server error."});}
-  if(images.length || p.images){
-    const old=await supabase.from("product_images").select("storage_path").eq("brand_id",q.brandId).eq("product_id",productId);
-    if(old.error)return r.status(500).json({error:"Could not prepare product images."});
-    if(old.data?.length){const removed=await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));if(removed.error)return r.status(500).json({error:"Could not prepare product images."});}
-    const deleted=await supabase.from("product_images").delete().eq("brand_id",q.brandId).eq("product_id",productId);
-    if(deleted.error)return r.status(500).json({error:"Could not prepare product images."});
-    const imageRows=[];
-    for(const {img,bytes,detected} of preparedImages){
-      const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
-      const path="brands/"+safeFileName(q.brandId)+"/desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
-      const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:true});
-      if(upImg.error)return r.status(500).json({error:"Internal server error."});
-      const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
-      imageRows.push({brand_id:q.brandId,product_id:productId,storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
-    }
-    if(imageRows.length){const ii=await supabase.from("product_images").insert(imageRows);if(ii.error)return r.status(500).json({error:"Internal server error."});}
+  const replaceImages=Array.isArray(p.images);
+  const imageRows=[],uploadedPaths=[];
+  for(const {img,bytes,detected} of preparedImages){
+    const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
+    const path="brands/"+safeFileName(q.brandId)+"/desktop/"+safeFileName(p.desktop_id)+"/sync-"+crypto.randomUUID()+"-"+safeFileName(color||"default")+"-"+sort+"."+ext;
+    const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:false});
+    if(upImg.error){if(uploadedPaths.length)await supabase.storage.from("product-images").remove(uploadedPaths);return r.status(500).json({error:"Could not upload product images; the existing product was not changed."});}
+    uploadedPaths.push(path);
+    const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+    imageRows.push({storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
   }
-  r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:images.length});
+  if(imageRows.length&&!productRow.image_url)productRow.image_url=imageRows.slice().sort((x,y)=>Number(y.is_primary)-Number(x.is_primary)||x.sort_order-y.sort_order)[0].public_url;
+  const variantRows=variants.map(v=>({desktop_variant_id:String(v.desktop_variant_id||v.id).trim(),sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Number(v.stock??0),active:v.active!==false}));
+  const synced=await supabase.rpc("sync_desktop_product_atomic",{
+    p_product:productRow,p_variants:variantRows,p_images:replaceImages?imageRows:null,p_warehouse_id:warehouseId
+  });
+  if(synced.error){if(uploadedPaths.length)await supabase.storage.from("product-images").remove(uploadedPaths);console.error("Atomic desktop product sync failed:",synced.error.message);return r.status(500).json({error:"Product sync failed. Existing product, variants, stock and image records were kept unchanged."});}
+  const productId=synced.data?.product_id;
+  const oldPaths=Array.isArray(synced.data?.old_storage_paths)?synced.data.old_storage_paths.filter(Boolean):[];
+  const obsoletePaths=oldPaths.filter(path=>!uploadedPaths.includes(path));
+  if(obsoletePaths.length){const removed=await supabase.storage.from("product-images").remove(obsoletePaths);if(removed.error)console.error("Old product image cleanup pending:",removed.error.message);}
+  r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:replaceImages?imageRows.length:undefined});
 });
 app.get("/api/desktop/orders",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
