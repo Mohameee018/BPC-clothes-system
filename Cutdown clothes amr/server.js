@@ -466,7 +466,7 @@ app.post("/api/admin/customers/reset-password",async(q,r)=>{
 });
 app.post("/api/admin/subscriptions/create",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
- const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual"),amount=Number(q.body?.amount||0);
+ const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
   if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
  if(!email||!name)return r.status(400).json({error:"Customer name and email are required."});
  const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
@@ -481,7 +481,8 @@ app.post("/api/admin/subscriptions/create",async(q,r)=>{
  const now=new Date(),expires=addDays(now,Number(plan.data.duration_days));
  const sub=await supabase.from("subscriptions").insert({brand_id:brandId,auth_user_id:created.data.user.id,plan_id:plan.data.id,status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),customer_name:name,customer_email:email,payment_method:paymentMethod,payment_reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null}).select("id").single();
  if(sub.error){await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not create the subscription."});}
- await supabase.from("subscription_payments").insert({subscription_id:sub.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  const payment=await supabase.from("subscription_payments").insert({subscription_id:sub.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  if(payment.error){await supabase.from("subscriptions").delete().eq("id",sub.data.id);await supabase.from("profiles").delete().eq("id",created.data.user.id);await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not record the subscription payment. The new account was rolled back."});}
  r.status(201).json({account:{email,password,name},subscription:{id:sub.data.id,plan:plan.data,starts_at:now.toISOString(),expires_at:expires.toISOString()}});
 });
 app.post("/api/admin/subscriptions/activation",async(q,r)=>{
@@ -528,7 +529,7 @@ app.post("/api/admin/subscriptions/approve-manual-transfer",async(q,r)=>{
 });
 app.post("/api/admin/subscriptions/renew",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
- const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
+ const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase().trim().toLowerCase(),amount=Number(q.body?.amount||0);
   if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
  if(!id)return r.status(400).json({error:"subscription_id is required."});
  const sub=await supabase.from("subscriptions").select("id,status,starts_at,expires_at,last_renewed_at,updated_at,plan_id,brand_id").eq("id",id).maybeSingle();
