@@ -1,0 +1,16 @@
+begin;
+drop policy if exists "profiles own brand" on public.profiles;
+drop policy if exists "profiles own or admin select" on public.profiles;
+drop policy if exists "profiles_select_own_or_admin" on public.profiles;
+drop policy if exists "profiles own update" on public.profiles;
+drop policy if exists "profiles_update_own" on public.profiles;
+drop policy if exists "profiles_select_own_v2" on public.profiles;
+drop policy if exists "profiles_update_safe_fields_v2" on public.profiles;
+create policy "profiles_select_own_v2" on public.profiles for select to authenticated using ((select auth.uid()) = id);
+create policy "profiles_update_safe_fields_v2" on public.profiles for update to authenticated using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
+revoke update on public.profiles from anon, authenticated;
+grant update (name, phone, updated_at) on public.profiles to authenticated;
+revoke insert, delete on public.profiles from anon, authenticated;
+alter table public.subscription_payments drop constraint if exists subscription_payments_payment_method_check;
+alter table public.subscription_payments add constraint subscription_payments_payment_method_check check (payment_method = any (array['manual'::text,'online'::text,'instapay'::text,'vodafone_cash'::text]));
+commit;
