@@ -1,0 +1,18 @@
+begin;
+drop policy if exists "customer read own profile" on public.customers;
+create policy "customer read own profile" on public.customers for select to authenticated using (auth_user_id = (select auth.uid()) or (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin())));
+drop policy if exists "customer update own profile" on public.customers;
+create policy "customer update own profile" on public.customers for update to authenticated using (auth_user_id = (select auth.uid()) or (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin()))) with check (auth_user_id = (select auth.uid()) or (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin())));
+revoke update on public.customers from anon, authenticated;
+grant update (name, email, phone, additional_phone, city, address, updated_at) on public.customers to authenticated;
+drop policy if exists "admin read inventory" on public.inventory;
+create policy "admin read inventory" on public.inventory for select to authenticated using (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin()));
+drop policy if exists "customer read own orders" on public.orders;
+create policy "customer read own orders" on public.orders for select to authenticated using (customer_id in (select c.id from public.customers c where c.auth_user_id = (select auth.uid())) or (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin())));
+drop policy if exists "customer read own order items" on public.order_items;
+create policy "customer read own order items" on public.order_items for select to authenticated using (order_id in (select o.id from public.orders o where o.customer_id in (select c.id from public.customers c where c.auth_user_id = (select auth.uid()))) or (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin())));
+drop policy if exists "admin read returns" on public.returns;
+create policy "admin read returns" on public.returns for select to authenticated using (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin()));
+drop policy if exists "admin read warehouses" on public.warehouses;
+create policy "admin read warehouses" on public.warehouses for select to authenticated using (brand_id = (select public.current_brand_id()) and (select public.is_brand_admin()));
+commit;
