@@ -227,7 +227,7 @@ async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!
 app.get("/api/admin/ping",async(q,r)=>{const admin=await requireBrandAdmin(q,r);if(!admin)return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:admin.profile.brand_id})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const accountProfile=await getAuthProfile(user.id);if(!accountProfile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});const accountBrand=await supabase.from("brands").select("id,active").eq("id",accountProfile.brand_id).maybeSingle();if(accountBrand.error||!accountBrand.data?.active)return r.status(403).json({error:"This account brand is inactive or unavailable."});
+ const accountProfile=await getAuthProfile(user.id);if(!accountProfile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});let accountBrand;try{accountBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!accountBrand?.active||String(accountBrand.id)!==String(accountProfile.brand_id))return r.status(403).json({error:"This account does not belong to this store."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
@@ -238,7 +238,7 @@ app.post("/api/account/profile",async(q,r)=>{
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
- const profile=await getAuthProfile(user.id); if(!profile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});
+ const profile=await getAuthProfile(user.id);if(!profile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});let accountBrand;try{accountBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!accountBrand?.active||String(accountBrand.id)!==String(profile.brand_id))return r.status(403).json({error:"This account does not belong to this store."});
  const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String(profile.brand_id)).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json({customer,orders:orders.data||[]});
 });
@@ -317,6 +317,7 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
  const stockReservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
  const authUser=await getAuthUser(q);let customerId=null;
  if(authUser){
+   const signedProfile=await getAuthProfile(authUser.id);if(!signedProfile?.brand_id||String(signedProfile.brand_id)!==brandId)return r.status(403).json({error:"This account belongs to a different store."});
    try{
      const accountCustomer=await ensureCustomerForUser(authUser);
      if(!accountCustomer?.id)return r.status(403).json({error:"This account is not assigned to a customer record."});
