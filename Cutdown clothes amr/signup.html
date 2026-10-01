@@ -36,7 +36,7 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 .signup-form button{border:0;border-radius:14px;padding:14px;background:#39c979;color:#062617;font-weight:600;cursor:pointer}
 .signup-form button:hover{background:#8ee9b1}
 .signup-form button:disabled{opacity:.55;cursor:not-allowed}
-.payment-choice{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:4px 0}
+.payment-choice{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:4px 0}
 .payment-choice label{padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.04);cursor:pointer;font-size:12px}
 .payment-choice label:has(input:checked){border-color:#39c979;background:rgba(57,201,121,.1)}
 .payment-choice input{width:auto;margin-left:6px}
@@ -96,8 +96,8 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
     <input name="phone" placeholder="رقم الهاتف" maxlength="40">
     <input name="password" type="password" placeholder="كلمة المرور — 8 أحرف على الأقل" minlength="8" required>
     <div class="payment-choice" aria-label="طريقة الدفع">
-      <label><input type="radio" name="payment_method" value="paymob" checked> Visa / Mastercard</label>
-      <label><input type="radio" name="payment_method" value="instapay"> InstaPay</label><label><input type="radio" name="payment_method" value="vodafone_cash"> Vodafone Cash</label>
+      <label><input type="radio" name="payment_method" value="instapay" checked> InstaPay</label>
+      <label><input type="radio" name="payment_method" value="vodafone_cash"> Vodafone Cash</label>
     </div>
     <button type="submit">إنشاء الحساب والمتابعة ←</button>
     <div id="instapayBox" class="instapay-box"></div>
