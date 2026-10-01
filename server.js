@@ -17,21 +17,35 @@ app.use(compression({threshold:"1kb"}));
 app.use(express.json({limit:"12mb"}));
 const blockedStatic=/^\/(?:server\.js|package(?:-lock)?\.json|\.env(?:\..*)?|supabase[^/]*\.sql)(?:$|\/)/i;
 app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
-app.use(express.static(__dirname,{index:"index.html",etag:true,maxAge:"1h",setHeaders:(res,file)=>{if(path.extname(file).toLowerCase()===".html")res.setHeader("Cache-Control","public, max-age=0, must-revalidate")}}));
-const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY):null;
+app.use(express.static(__dirname,{index:false,etag:true,maxAge:"1h",setHeaders:(res,file)=>{if(path.extname(file).toLowerCase()===".html")res.setHeader("Cache-Control","public, max-age=0, must-revalidate")}}));
+const SUPABASE_SERVER_KEY=process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY||"";
+const supabase=process.env.SUPABASE_URL&&SUPABASE_SERVER_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_SERVER_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 const rateBuckets=new Map();
 function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
+// Protect all super-admin API endpoints from brute-force/request flooding without affecting other app routes.
+app.use("/api/admin",rateLimit({windowMs:60*1000,max:120,keyPrefix:"admin-api"}));
 const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
-const configuredBrandId=()=>String(process.env.CUTDOWN_BRAND_ID||DEFAULT_BRAND_ID).trim();
+const configuredBrandId=()=>String((process.env.BPC_BRAND_ID||process.env.CUTDOWN_BRAND_ID)||DEFAULT_BRAND_ID).trim();
 async function resolvePublicBrand(req){
  if(!supabase)return null;
  const requested=String(req.query?.brand||req.body?.brand_slug||"").trim().toLowerCase();
- if(requested){const found=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("slug",requested).eq("active",true).maybeSingle();if(found.error)throw found.error;return found.data||null;}
+ if(requested){
+  const found=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("slug",requested).eq("active",true).maybeSingle();
+  if(found.error)throw found.error;
+  return found.data||null;
+ }
  const host=String(req.headers?.host||"").split(":")[0].toLowerCase();
  const baseHost=(()=>{try{return new URL(process.env.PUBLIC_BASE_URL||"").hostname.toLowerCase()}catch{return ""}})();
- if(host&&(!baseHost||host!==baseHost)){const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);if(brands.error)throw brands.error;const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});if(match)return match;}
- const fallback=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",configuredBrandId()).eq("active",true).maybeSingle();if(fallback.error)throw fallback.error;return fallback.data||null;
+ if(host&&(!baseHost||host!==baseHost)){
+  const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);
+  if(brands.error)throw brands.error;
+  const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});
+  if(match)return match;
+ }
+ const fallback=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",configuredBrandId()).eq("active",true).maybeSingle();
+ if(fallback.error)throw fallback.error;
+ return fallback.data||null;
 }
 
 async function requireDesktopSync(q,r,next){
@@ -54,42 +68,57 @@ app.post("/api/desktop/products/sync",rateLimit({windowMs:60*1000,max:30,keyPref
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
   const p=q.body?.product;
   if(!p?.desktop_id||!p?.name)return r.status(400).json({error:"product.desktop_id and product.name are required."});
+
+  // Validate every nested payload before the first database/storage mutation.
+  // This prevents malformed variants/images from leaving an avoidable partial sync.
+  const variants=Array.isArray(p.variants)?p.variants:[];
+  const variantIds=new Set();
+  for(const v of variants){
+    const variantId=String(v?.desktop_variant_id||v?.id||"").trim();
+    const variantStock=Number(v?.stock??0);
+    if(!variantId||variantIds.has(variantId)||!Number.isSafeInteger(variantStock)||variantStock<0)
+      return r.status(400).json({error:"Invalid or duplicate variant ID/stock."});
+    variantIds.add(variantId);
+  }
+  const images=Array.isArray(p.images)?p.images.slice(0,50):[];
+  const preparedImages=[];
+  for(const img of images){
+    if(!img?.data_base64)continue;
+    const bytes=Buffer.from(String(img.data_base64),"base64");
+    if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
+    const detected=detectImage(bytes);
+    if(!detected)return r.status(415).json({error:"Unsupported product image type."});
+    preparedImages.push({img,bytes,detected});
+  }
   const price=Number(p.price||0),costPrice=Number(p.cost_price||0),stock=Number(p.stock||0),minimumStock=Number(p.minimum_stock||0);
   if(!Number.isFinite(price)||price<0||!Number.isFinite(costPrice)||costPrice<0||!Number.isSafeInteger(stock)||stock<0||!Number.isSafeInteger(minimumStock)||minimumStock<0)return r.status(400).json({error:"Invalid product pricing or stock."});
-  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_path:String(p.image_path||""),price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
-  const up=await supabase.from("products").upsert(productRow,{onConflict:"brand_id,desktop_id"}).select().single();
-  if(up.error)return r.status(500).json({error:"Internal server error."});
-  const productId=up.data.id;
+  const productRow={brand_id:q.brandId,desktop_id:String(p.desktop_id),sku:String(p.sku||""),name:String(p.name),category:String(p.category||""),description:String(p.description||""),image_url:/^https?:\/\//i.test(String(p.image_url||""))?String(p.image_url):"",price,cost_price:costPrice,stock,minimum_stock:minimumStock,active:p.active!==false,is_active:p.active!==false};
   let warehouse=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();
-  if(warehouse.error)return r.status(500).json({error:"Internal server error."});
-  if(!warehouse.data){const createdWarehouse=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(createdWarehouse.error)return r.status(500).json({error:"Internal server error."});warehouse={data:createdWarehouse.data};}
+  if(warehouse.error)return r.status(500).json({error:"Could not load the store warehouse."});
+  if(!warehouse.data){const createdWarehouse=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(createdWarehouse.error)return r.status(500).json({error:"Could not create the store warehouse."});warehouse={data:createdWarehouse.data};}
   const warehouseId=warehouse.data.id;
-  const variants=Array.isArray(p.variants)?p.variants:[];
-  if(variants.length){const rows=variants.map(v=>({brand_id:q.brandId,desktop_variant_id:String(v.desktop_variant_id||v.id),product_id:productId,sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Math.max(0,Number(v.stock||0)),active:v.active!==false}));const vu=await supabase.from("product_variants").upsert(rows,{onConflict:"brand_id,desktop_variant_id"});if(vu.error)return r.status(500).json({error:"Internal server error."});const ids=rows.map(v=>v.desktop_variant_id);const stale=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId).not("desktop_variant_id","in","("+ids.join(",")+")");if(stale.error)return r.status(500).json({error:"Internal server error."});}else{const clear=await supabase.from("product_variants").delete().eq("brand_id",q.brandId).eq("product_id",productId);if(clear.error)return r.status(500).json({error:"Internal server error."});}
-  const inv=await supabase.from("inventory").select("id").eq("brand_id",q.brandId).eq("product_id",productId).eq("warehouse_id",warehouseId).is("variant_id",null).maybeSingle();
-  if(inv.error)return r.status(500).json({error:"Internal server error."});
-  if(inv.data){const iu=await supabase.from("inventory").update({quantity:stock,updated_at:new Date().toISOString()}).eq("id",inv.data.id);if(iu.error)return r.status(500).json({error:"Internal server error."});}
-  else{const ii=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:productId,warehouse_id:warehouseId,quantity:stock});if(ii.error)return r.status(500).json({error:"Internal server error."});}
-  const images=Array.isArray(p.images)?p.images.slice(0,50):[];
-  if(images.length || p.images){
-    const old=await supabase.from("product_images").select("storage_path").eq("brand_id",q.brandId).eq("product_id",productId);
-    if(old.data?.length)await supabase.storage.from("product-images").remove(old.data.map(x=>x.storage_path).filter(Boolean));
-    await supabase.from("product_images").delete().eq("brand_id",q.brandId).eq("product_id",productId);
-    const imageRows=[];
-    for(const img of images){
-      if(!img.data_base64)continue;
-      const bytes=Buffer.from(String(img.data_base64),"base64");if(bytes.length>1572864)return r.status(413).json({error:"Product image is too large. Maximum is 1.5 MB per image."});
-      const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Unsupported product image type."});
-      const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
-      const path="desktop/"+safeFileName(p.desktop_id)+"/"+safeFileName(color||"default")+"-"+sort+"."+ext;
-      const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:true});
-      if(upImg.error)return r.status(500).json({error:"Internal server error."});
-      const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
-      imageRows.push({brand_id:q.brandId,product_id:productId,storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
-    }
-    if(imageRows.length){const ii=await supabase.from("product_images").insert(imageRows);if(ii.error)return r.status(500).json({error:"Internal server error."});}
+  const replaceImages=Array.isArray(p.images);
+  const imageRows=[],uploadedPaths=[];
+  for(const {img,bytes,detected} of preparedImages){
+    const ext=detected.ext,color=String(img.color||"").trim().slice(0,80),sort=Number(img.sort_order||0);
+    const path="brands/"+safeFileName(q.brandId)+"/desktop/"+safeFileName(p.desktop_id)+"/sync-"+crypto.randomUUID()+"-"+safeFileName(color||"default")+"-"+sort+"."+ext;
+    const upImg=await supabase.storage.from("product-images").upload(path,bytes,{contentType:detected.mime,upsert:false});
+    if(upImg.error){if(uploadedPaths.length)await supabase.storage.from("product-images").remove(uploadedPaths);return r.status(500).json({error:"Could not upload product images; the existing product was not changed."});}
+    uploadedPaths.push(path);
+    const pub=supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+    imageRows.push({storage_path:path,public_url:pub,alt_text:String(img.alt_text||p.name),sort_order:sort,is_primary:sort===0,color});
   }
-  r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:images.length});
+  if(imageRows.length&&!productRow.image_url)productRow.image_url=imageRows.slice().sort((x,y)=>Number(y.is_primary)-Number(x.is_primary)||x.sort_order-y.sort_order)[0].public_url;
+  const variantRows=variants.map(v=>({desktop_variant_id:String(v.desktop_variant_id||v.id).trim(),sku:String(v.sku||""),size:String(v.size||""),color:String(v.color||""),stock:Number(v.stock??0),active:v.active!==false}));
+  const synced=await supabase.rpc("sync_desktop_product_atomic",{
+    p_product:productRow,p_variants:variantRows,p_images:replaceImages?imageRows:null,p_warehouse_id:warehouseId
+  });
+  if(synced.error){if(uploadedPaths.length)await supabase.storage.from("product-images").remove(uploadedPaths);console.error("Atomic desktop product sync failed:",synced.error.message);return r.status(500).json({error:"Product sync failed. Existing product, variants, stock and image records were kept unchanged."});}
+  const productId=synced.data?.product_id;
+  const oldPaths=Array.isArray(synced.data?.old_storage_paths)?synced.data.old_storage_paths.filter(Boolean):[];
+  const obsoletePaths=oldPaths.filter(path=>!uploadedPaths.includes(path));
+  if(obsoletePaths.length){const removed=await supabase.storage.from("product-images").remove(obsoletePaths);if(removed.error)console.error("Old product image cleanup pending:",removed.error.message);}
+  r.json({ok:true,product_id:productId,desktop_id:p.desktop_id,variant_count:variants.length,image_count:replaceImages?imageRows.length:undefined});
 });
 app.get("/api/desktop/orders",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
@@ -107,7 +136,7 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
  if(result.error){
    const msg=String(result.error.message||"");
    if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
-   if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."}); if(msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Invalid refund amount."}); if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
+   if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."}); if(msg.includes("INVALID_RETURN_REFUND_AMOUNT")||msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Refund amount must not exceed the order total."}); if(msg.includes("RETURN_REASON_DISPOSITION_MISMATCH"))return r.status(400).json({error:"The selected return reason requires a different stock disposition."}); if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
    if(msg.includes("ORDER_NOT_CONFIRMED"))return r.status(409).json({error:"Order is not confirmed for return."});
    if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
    return r.status(500).json({error:"Could not process return."});
@@ -144,17 +173,165 @@ async function ensureCustomerForUser(user){
   return linked.data||null;
 }const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
 const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
-app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"signup"}),async(q,r)=>{
+function hashActivationCode(code){
+  return crypto.createHash("sha256").update(String(code||"").trim().toUpperCase()).digest("hex");
+}
+function makeActivationCode(){
+  return crypto.randomBytes(5).toString("hex").toUpperCase().match(/.{1,4}/g).join("-");
+}
+function addDays(date,days){return new Date(date.getTime()+Number(days)*86400000)}
+async function getSubscriptionForUser(userId){
+  if(!supabase||!userId)return null;
+  const profile=await getAuthProfile(userId);
+  if(!profile?.brand_id)return null;
+  const now=new Date();
+  const q=await supabase.from("subscriptions")
+    .select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,plan_id,subscription_plans(code,name,duration_days,price)")
+    .eq("auth_user_id",userId)
+    .eq("brand_id",profile.brand_id)
+    .order("expires_at",{ascending:false})
+    .limit(1)
+    .maybeSingle();
+  if(q.error)return null;
+  const sub=q.data;
+  if(!sub)return null;
+  if(sub.expires_at && new Date(sub.expires_at)<=now && sub.status==="active"){
+    await supabase.from("subscriptions").update({status:"expired",updated_at:now.toISOString()}).eq("id",sub.id).eq("status","active");
+    sub.status="expired";
+  }
+  return sub;
+}
+function subscriptionView(sub){
+  if(!sub)return {status:"none",active:false,warning:false};
+  const expires=sub.expires_at?new Date(sub.expires_at):null;
+  const isLifetime=sub.subscription_plans?.code==="lifetime";
+  const ms=expires?expires.getTime()-Date.now():null;
+  const daysLeft=expires?Math.ceil(ms/86400000):null;
+  const warning=!isLifetime&&sub.status==="active"&&daysLeft!==null&&daysLeft<=7;
+  return {
+    id:sub.id,status:sub.status,active:sub.status==="active"&&(isLifetime||!!expires&&expires.getTime()>Date.now()),
+    warning,days_left:daysLeft,starts_at:sub.starts_at||null,expires_at:sub.expires_at||null,
+    plan:sub.subscription_plans||null
+  };
+}
+async function requireActiveSubscription(userId,res){
+  const sub=await getSubscriptionForUser(userId);
+  const view=subscriptionView(sub);
+  if(!view.active){
+    const message=view.status==="expired"?"Your subscription has expired. Renew to continue.":"A paid BPC subscription is required to access the system.";
+    return {ok:false,response:res.status(403).json({error:message,code:view.status==="expired"?"SUBSCRIPTION_EXPIRED":"SUBSCRIPTION_REQUIRED",subscription:view})};
+  }
+  return {ok:true,subscription:sub,view};
+}
+
+app.get("/api/subscription/plans",async(_q,r)=>{
+ if(!supabase)return r.status(503).json({error:"Subscription service is not configured."});
+ const p=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("active",true).order("duration_days");
+ if(p.error)return r.status(500).json({error:"Could not load subscription plans."});
+ r.json({plans:p.data||[]});
+});
+app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"subscription-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
- const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim();let publicBrand;try{publicBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!publicBrand)return r.status(404).json({error:"Store brand not found or inactive."});
- if(!email||password.length<6)return r.status(400).json({error:"Email and password are required; password must be at least 6 characters."});
- const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone}}});
+ const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),planCode=String(q.body?.plan||"").trim().toLowerCase();
+ if(!email||password.length<8||!name||!planCode)return r.status(400).json({error:"Name, email, password (8+ characters), and a subscription plan are required."});
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error)return r.status(500).json({error:"Could not load the selected plan."});
+ if(!plan.data)return r.status(400).json({error:"The selected subscription plan is unavailable."});
+ const price=Number(plan.data.price||0);
+ if(!Number.isFinite(price)||price<=0)return r.status(400).json({error:"The selected plan has an invalid price."});
+ const signed=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name,phone}});
  if(signed.error)return r.status(400).json({error:signed.error.message});
  const user=signed.data.user;
  if(!user)return r.status(400).json({error:"Account could not be created."});
- const profile=await supabase.from("profiles").update({brand_id:publicBrand.id,role:"customer",name,phone}).eq("id",user.id);
- if(profile.error)return r.status(500).json({error:"Account created but brand assignment failed. Please contact support."});
- r.status(201).json({user:{id:user.id,email:user.email||null},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
+ // Create a normal authenticated session for the newly created account. The management
+ // area remains protected by the pending subscription gate, while the payment page can
+ // securely read only this user's pending subscription.
+ const paymentSession=await authClient.auth.signInWithPassword({email,password});
+ if(paymentSession.error||!paymentSession.data?.session){
+  await supabase.auth.admin.deleteUser(user.id);
+  return r.status(500).json({error:"Account was created but the payment session could not be started."});
+ }
+ const brandId=crypto.randomUUID();
+ const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
+ const brandSlug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
+ const brand=await supabase.from("brands").insert({id:brandId,name:name+" Store",slug:brandSlug,active:true,website_url:null,settings:{}}).select("id").single();
+ if(brand.error){await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Store workspace could not be created."});}
+ const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name,phone}).eq("id",user.id);
+ if(profile.error){await supabase.from("brands").delete().eq("id",brandId);await supabase.auth.admin.deleteUser(user.id);return r.status(500).json({error:"Account could not be assigned to its store workspace."});}
+ const paymentRef="BPC-"+crypto.randomBytes(12).toString("hex");
+ const now=new Date(),activationExpires=addDays(now,1/24);
+ const pending=await supabase.from("subscriptions").insert({
+   brand_id:brandId,auth_user_id:user.id,plan_id:plan.data.id,status:"pending",
+   starts_at:null,expires_at:null,activation_code_hash:hashActivationCode(paymentRef),
+   activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,
+   payment_method:"manual",updated_at:now.toISOString()
+ }).select("id").single();
+ if(pending.error){
+  console.error("SUBSCRIPTION_PENDING_INSERT_FAILED",{
+    code:pending.error.code,
+    message:pending.error.message,
+    details:pending.error.details,
+    hint:pending.error.hint,
+    userId:user.id,
+    planId:plan.data.id,
+    brandId,
+  });
+  await supabase.from("brands").delete().eq("id",brandId);
+  await supabase.auth.admin.deleteUser(user.id);
+  return r.status(500).json({error:"Could not create the pending subscription."});
+}
+  const requestedMethod=String(q.body?.payment_method||"instapay").trim().toLowerCase();
+  if(!["instapay","vodafone_cash"].includes(requestedMethod)){
+   await supabase.from("subscriptions").delete().eq("id",pending.data.id);
+   await supabase.from("brands").delete().eq("id",brandId);
+   await supabase.auth.admin.deleteUser(user.id);
+   return r.status(400).json({error:"Choose InstaPay or Vodafone Cash. Online card payment is not available."});
+  }
+  const manual=await getPlatformPaymentSettings();
+  const methodUpdate=await supabase.from("subscriptions").update({payment_method:requestedMethod,activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
+  if(methodUpdate.error)return r.status(500).json({error:"Could not save the selected payment method."});
+  return r.status(201).json({
+   user:{id:user.id,email:user.email||email},session:paymentSession.data.session,requires_email_confirmation:false,
+   subscription:{id:pending.data.id,plan:plan.data,status:"pending"},
+   payment:{method:requestedMethod,status:"pending",reference:paymentRef,instructions:requestedMethod==="instapay"?{
+    address:manual.instapayAddress,name:manual.instapayName,bank:manual.instapayBank,account:manual.instapayAccount,amount:price,currency:"EGP"
+   }:{number:manual.vodafoneCashNumber,name:manual.vodafoneCashName,amount:price,currency:"EGP"}}
+  });
+ });
+ app.post("/api/subscription/instapay-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"instapay-reference"}),async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const reference=String(q.body?.reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(reference.length<3||reference.length>120)return r.status(400).json({error:"Enter a valid InstaPay transaction reference."});
+ const sub=await supabase.from("subscriptions").select("id,status,payment_method,plan_id").eq("auth_user_id",user.id).eq("status","pending").order("created_at",{ascending:false}).limit(1).maybeSingle();
+ if(sub.error)return r.status(500).json({error:"Could not load your pending subscription."});
+ if(!sub.data)return r.status(404).json({error:"No pending subscription was found."});
+ if(sub.data.payment_method!=="instapay")return r.status(409).json({error:"This subscription is not using InstaPay."});
+ const up=await supabase.from("subscriptions").update({payment_reference:reference,notes:notes||null,updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending").select("id,payment_reference,notes,status").single();
+ if(up.error)return r.status(500).json({error:"Could not save the transfer reference."});
+ r.json({ok:true,subscription:up.data,status:"pending"});
+});
+app.post("/api/subscription/manual-transfer-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"manual-transfer-reference"}),async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const method=String(q.body?.payment_method||"").trim().toLowerCase(),reference=String(q.body?.reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!["instapay","vodafone_cash"].includes(method))return r.status(400).json({error:"Unsupported manual payment method."});
+ if(reference.length<3||reference.length>120)return r.status(400).json({error:"Enter a valid transaction reference."});
+ const sub=await supabase.from("subscriptions").select("id,status,payment_method").eq("auth_user_id",user.id).eq("status","pending").order("created_at",{ascending:false}).limit(1).maybeSingle();
+ if(sub.error)return r.status(500).json({error:"Could not load your pending subscription."});
+ if(!sub.data)return r.status(404).json({error:"No pending subscription was found."});
+ if(sub.data.payment_method!==method)return r.status(409).json({error:"This subscription is using a different payment method."});
+ const up=await supabase.from("subscriptions").update({payment_reference:reference,notes:notes||null,updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending").select("id,payment_reference,notes,status").single();
+ if(up.error)return r.status(500).json({error:"Could not save the transfer reference."});
+ r.json({ok:true,subscription:up.data,status:"pending"});
+});
+app.get("/api/subscription/status",async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const sub=await getSubscriptionForUser(user.id);const view=subscriptionView(sub);
+ if(view.status==="pending"&&(sub?.payment_method==="instapay"||sub?.payment_method==="vodafone_cash")){
+  const payment=await getPlatformPaymentSettings();
+  view.payment_method=sub.payment_method;
+  view.payment=sub.payment_method==="instapay"?{address:payment.instapayAddress,name:payment.instapayName,bank:payment.instapayBank,account:payment.instapayAccount}:{number:payment.vodafoneCashNumber,name:payment.vodafoneCashName};
+ }
+ r.json({subscription:view});
 });
 app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"desktop-login"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
@@ -162,23 +339,74 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  if(!email||!password)return r.status(400).json({error:"Email and password are required."});
  const signed=await authClient.auth.signInWithPassword({email,password});
  if(signed.error||!signed.data?.session)return r.status(401).json({error:"Invalid email or password."});
- const user=signed.data.user,profile=await getAuthProfile(user.id);
- if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a brand administrator."});}
- const brand=await supabase.from("brands").select("id,name,slug,active").eq("id",profile.brand_id).maybeSingle();
- if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This brand is inactive or unavailable."});}
- r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data});
+ const user=signed.data.user;let profile=await getAuthProfile(user.id);
+ if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a BPC company administrator."});}
+ profile=await ensureSubscriberWorkspace(user,profile);
+ const brand=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",profile.brand_id).maybeSingle();
+ if(brand.error||!brand.data?.active){await authClient.auth.signOut();return r.status(403).json({error:"This company is inactive or unavailable."});}
+ const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);
+ if(!gate.ok){await authClient.auth.signOut();return gate.response;}
+ r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data,subscription:gate.view});
 });
+async function ensureSubscriberWorkspace(user,profile){
+ if(!supabase||!user?.id||!profile?.brand_id||isSuperAdminUser(user))return profile;
+ const configured=String(configuredBrandId());
+ const sub=await getSubscriptionForUser(user.id);
+ if(!sub||String(sub.brand_id)!==configured||String(profile.brand_id)!==configured)return profile;
+ const name=String(profile.name||user.user_metadata?.name||"Store").trim()||"Store";
+ const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
+ const brandId=crypto.randomUUID(),slug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
+ const created=await supabase.from("brands").insert({id:brandId,name:name+" Store",slug,active:true,website_url:null,settings:{}}).select("id").single();
+ if(created.error)return profile;
+ const pu=await supabase.from("profiles").update({brand_id:brandId}).eq("id",user.id).eq("brand_id",configured);
+ if(pu.error){await supabase.from("brands").delete().eq("id",brandId);return profile;}
+ const su=await supabase.from("subscriptions").update({brand_id:brandId,updated_at:new Date().toISOString()}).eq("id",sub.id).eq("auth_user_id",user.id).eq("brand_id",configured);
+ if(su.error){await supabase.from("profiles").update({brand_id:configured}).eq("id",user.id).eq("brand_id",brandId);await supabase.from("brands").delete().eq("id",brandId);return profile;}
+ return {...profile,brand_id:brandId};
+}
+function isSuperAdminUser(user){
+ const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
+ return !!expected&&String(user?.email||"").toLowerCase()===expected;
+}
+async function getPlatformPaymentSettings(){
+ const fallback={
+  instapayAddress:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),instapayName:String(process.env.BPC_INSTAPAY_NAME||"").trim(),instapayBank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),instapayAccount:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim(),
+  vodafoneCashNumber:String(process.env.BPC_VODAFONE_CASH_NUMBER||"").trim(),vodafoneCashName:String(process.env.BPC_VODAFONE_CASH_NAME||"").trim()
+ };
+ if(!supabase)return fallback;
+ const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ if(row.error||!row.data?.settings?.payment)return fallback;
+ const p=row.data.settings.payment||{};
+ return {...fallback,instapayAddress:String(p.instapayAddress??fallback.instapayAddress).trim(),instapayName:String(p.instapayName??fallback.instapayName).trim(),instapayBank:String(p.instapayBank??fallback.instapayBank).trim(),instapayAccount:String(p.instapayAccount??fallback.instapayAccount).trim(),vodafoneCashNumber:String(p.vodafoneCashNumber??fallback.vodafoneCashNumber).trim(),vodafoneCashName:String(p.vodafoneCashName??fallback.vodafoneCashName).trim()};
+}
 async function requireSuperAdmin(req,res){
  const user=await getAuthUser(req); if(!user)return {ok:false,response:res.status(401).json({error:"Not authenticated."})};
- const expected=String(process.env.CUTDOWN_SUPER_ADMIN_EMAIL||"").trim().toLowerCase();
- if(!expected||String(user.email||"").toLowerCase()!==expected)return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
+ if(!isSuperAdminUser(user))return {ok:false,response:res.status(403).json({error:"Super administrator access required."})};
  return {ok:true,user};
 }
+app.get("/api/admin/payment-settings",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ r.json(await getPlatformPaymentSettings());
+});
+app.patch("/api/admin/payment-settings",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const current=await getPlatformPaymentSettings();
+ const clean={...current};
+ for(const key of ["instapayAddress","instapayName","instapayBank","instapayAccount","vodafoneCashNumber","vodafoneCashName"]){if(Object.prototype.hasOwnProperty.call(q.body||{},key))clean[key]=String(q.body[key]||"").trim().slice(0,160)}
+ if(clean.vodafoneCashNumber&&!/^[0-9+\\s-]{8,25}$/.test(clean.vodafoneCashNumber))return r.status(400).json({error:"Invalid Vodafone Cash number."});
+ const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ if(row.error||!row.data)return r.status(404).json({error:"BPC owner brand was not found."});
+ const settings={...(row.data.settings||{}),payment:clean};
+ const up=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",configuredBrandId()).select("settings").single();
+ if(up.error)return r.status(500).json({error:"Could not save payment settings."});
+ r.json(clean);
+});
+app.get("/api/admin/brands",async(q,r)=>{const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").order("name");if(brands.error)return r.status(500).json({error:"Could not load brands."});r.json(brands.data||[])});
 app.post("/api/admin/brands",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
  const name=String(q.body?.name||"").trim(),slug=String(q.body?.slug||"").trim().toLowerCase().replace(/[^a-z0-9-]+/g,"-").replace(/^-+|-+$/g,"");
  if(!name||!slug)return r.status(400).json({error:"Brand name and slug are required."});if(name.length>120||slug.length>80)return r.status(400).json({error:"Brand name or slug is too long."});
- const created=await supabase.from("brands").insert({name,slug,website_url:q.body?.website_url||null}).select("id,name,slug,active,website_url").single();
+ const created=await supabase.from("brands").insert({name,slug,website_url:q.body?.website_url||null}).select("id,name,slug,active,website_url,settings").single();
  if(created.error)return r.status(409).json({error:created.error.message}); r.status(201).json(created.data);
 });
 app.post("/api/admin/brands/account",async(q,r)=>{
@@ -193,6 +421,129 @@ app.post("/api/admin/brands/account",async(q,r)=>{
  const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
  if(profile.error)return r.status(500).json({error:"Internal server error."});
  r.status(201).json({user_id:created.data.user.id,email,brand:brand.data});
+});
+app.get("/api/admin/plans",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const p=await supabase.from("subscription_plans").select("id,code,name,duration_days,price,active").order("duration_days");
+ if(p.error)return r.status(500).json({error:"Could not load plans."});r.json(p.data||[]);
+});
+app.patch("/api/admin/plans/:id",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const price=Number(q.body?.price),active=q.body?.active!==false;
+ if(!Number.isFinite(price)||price<0)return r.status(400).json({error:"Invalid plan price."});
+ const up=await supabase.from("subscription_plans").update({price,active,updated_at:new Date().toISOString()}).eq("id",q.params.id).select("id,code,name,duration_days,price,active").maybeSingle();
+ if(up.error)return r.status(400).json({error:"Could not update plan."});if(!up.data)return r.status(404).json({error:"Plan not found."});r.json(up.data);
+});
+app.get("/api/admin/subscriptions",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const subs=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,notes,created_at,last_renewed_at,subscription_plans(code,name,duration_days,price)").order("expires_at",{ascending:false}).limit(500);
+ if(subs.error)return r.status(500).json({error:"Could not load subscriptions."});
+ const rows=subs.data||[];
+ const userIds=[...new Set(rows.map(x=>x.auth_user_id).filter(Boolean))];
+ const profiles=userIds.length?await supabase.from("profiles").select("id,phone").in("id",userIds):{data:[],error:null};
+ if(profiles.error)return r.status(500).json({error:"Could not load customer contact details."});
+ const phones=new Map((profiles.data||[]).map(x=>[x.id,x.phone||""]));
+ r.json(rows.map(x=>({...x,customer_phone:phones.get(x.auth_user_id)||""})));
+});
+app.get("/api/admin/customers",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const profiles=await supabase.from("profiles").select("id,name,phone,role,brand_id,brands(id,name,slug,active)").eq("role","admin").order("name",{ascending:true}).limit(1000);
+ if(profiles.error)return r.status(500).json({error:"Could not load customers."});
+ const ids=(profiles.data||[]).map(x=>x.id);
+ const subs=ids.length?await supabase.from("subscriptions").select("id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,payment_reference,created_at,subscription_plans(code,name,duration_days,price)").in("auth_user_id",ids).order("created_at",{ascending:false}):{data:[],error:null};
+ if(subs.error)return r.status(500).json({error:"Could not load customer subscriptions."});
+ const latest=new Map();
+ for(const s of (subs.data||[]))if(!latest.has(s.auth_user_id))latest.set(s.auth_user_id,s);
+ r.json((profiles.data||[]).map(p=>{const s=latest.get(p.id);return {id:p.id,name:p.name||"",phone:p.phone||"",role:p.role,brand:p.brands||null,subscription:s||null};}));
+});
+app.post("/api/admin/customers/reset-password",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const userId=String(q.body?.user_id||"").trim(),password=String(q.body?.password||"");
+ if(!userId||password.length<8)return r.status(400).json({error:"User ID and a password of at least 8 characters are required."});
+ const profile=await supabase.from("profiles").select("id,role").eq("id",userId).maybeSingle();
+ if(profile.error||!profile.data||profile.data.role!=="admin")return r.status(404).json({error:"Customer account not found."});
+ const updated=await supabase.auth.admin.updateUserById(userId,{password});
+ if(updated.error)return r.status(400).json({error:updated.error.message});
+ r.json({ok:true});
+});
+app.post("/api/admin/subscriptions/create",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
+  if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
+ if(!email||!name)return r.status(400).json({error:"Customer name and email are required."});
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error||!plan.data)return r.status(400).json({error:"Invalid subscription plan."});
+ const brand=await supabase.from("brands").select("id,name,active").eq("id",brandId).maybeSingle();
+ if(brand.error||!brand.data?.active)return r.status(404).json({error:"Brand not found or inactive."});
+ const password=crypto.randomBytes(9).toString("base64url");
+ const created=await supabase.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{name}});
+ if(created.error)return r.status(409).json({error:created.error.message});
+ const profile=await supabase.from("profiles").update({brand_id:brandId,role:"admin",name}).eq("id",created.data.user.id);
+ if(profile.error){await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not assign the account to the company."});}
+ const now=new Date(),expires=addDays(now,Number(plan.data.duration_days));
+ const sub=await supabase.from("subscriptions").insert({brand_id:brandId,auth_user_id:created.data.user.id,plan_id:plan.data.id,status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),customer_name:name,customer_email:email,payment_method:paymentMethod,payment_reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null}).select("id").single();
+ if(sub.error){await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not create the subscription."});}
+  const payment=await supabase.from("subscription_payments").insert({subscription_id:sub.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  if(payment.error){await supabase.from("subscriptions").delete().eq("id",sub.data.id);await supabase.from("profiles").delete().eq("id",created.data.user.id);await supabase.auth.admin.deleteUser(created.data.user.id);return r.status(500).json({error:"Could not record the subscription payment. The new account was rolled back."});}
+ r.status(201).json({account:{email,password,name},subscription:{id:sub.data.id,plan:plan.data,starts_at:now.toISOString(),expires_at:expires.toISOString()}});
+});
+app.post("/api/admin/subscriptions/activation",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),amount=Number(q.body?.amount||0);
+ const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
+ if(plan.error||!plan.data||!email||!name)return r.status(400).json({error:"Valid name, email and plan are required."});
+ const code=makeActivationCode(),now=new Date(),activationExpires=addDays(now,7);
+ const ins=await supabase.from("subscriptions").insert({brand_id:brandId,plan_id:plan.data.id,status:"pending",activation_code_hash:hashActivationCode(code),activation_expires_at:activationExpires.toISOString(),customer_name:name,customer_email:email,payment_method:"manual",payment_reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null}).select("id").single();
+ if(ins.error)return r.status(500).json({error:"Could not create activation."});
+ await supabase.from("subscription_payments").insert({subscription_id:ins.data.id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(plan.data.price||0),payment_method:"manual",reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+ r.status(201).json({activation_code:code,expires_at:activationExpires.toISOString(),plan:plan.data,customer:{name,email}});
+});
+app.post("/api/admin/subscriptions/approve-instapay",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),reference=String(q.body?.payment_reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,payment_method,payment_reference,notes,plan_id,customer_name,customer_email,subscription_plans(code,name,duration_days,price)").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ if(sub.data.status!=="pending"||sub.data.payment_method!=="instapay")return r.status(409).json({error:"This subscription is not a pending InstaPay payment."});
+ const finalReference=reference||String(sub.data.payment_reference||"").trim();
+ if(!finalReference)return r.status(400).json({error:"A transaction reference is required before approval."});
+ const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
+ if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
+ const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:"instapay",reference:finalReference,notes:notes||null});
+ if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
+ r.json({ok:true,subscription:up.data});
+});
+app.post("/api/admin/subscriptions/approve-manual-transfer",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),reference=String(q.body?.payment_reference||"").trim(),notes=String(q.body?.notes||"").trim();
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,payment_method,payment_reference,notes,plan_id,customer_name,customer_email,subscription_plans(code,name,duration_days,price)").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ if(sub.data.status!=="pending"||!["instapay","vodafone_cash"].includes(sub.data.payment_method))return r.status(409).json({error:"This subscription is not a pending manual payment."});
+ const finalReference=reference||String(sub.data.payment_reference||"").trim();if(!finalReference)return r.status(400).json({error:"A transaction reference is required before approval."});
+ const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
+ const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
+ if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
+ const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:sub.data.payment_method,reference:finalReference,notes:notes||null});
+ if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
+ r.json({ok:true,subscription:up.data});
+});
+app.post("/api/admin/subscriptions/renew",async(q,r)=>{
+ const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
+ const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase().trim().toLowerCase(),amount=Number(q.body?.amount||0);
+  if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
+ if(!id)return r.status(400).json({error:"subscription_id is required."});
+ const sub=await supabase.from("subscriptions").select("id,status,starts_at,expires_at,last_renewed_at,updated_at,plan_id,brand_id").eq("id",id).maybeSingle();
+ if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
+ const planQuery=planCode?await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle():await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("id",sub.data.plan_id).maybeSingle();
+ if(planQuery.error||!planQuery.data)return r.status(400).json({error:"Invalid renewal plan."});
+ const now=new Date(),base=sub.data.expires_at&&new Date(sub.data.expires_at)>now?new Date(sub.data.expires_at):now,expires=addDays(base,Number(planQuery.data.duration_days));
+ const up=await supabase.from("subscriptions").update({plan_id:planQuery.data.id,status:"active",starts_at:sub.data.status==="expired"?now.toISOString():sub.data.starts_at,expires_at:expires.toISOString(),updated_at:now.toISOString(),last_renewed_at:now.toISOString()}).eq("id",id).select("id,expires_at,status").single();
+ if(up.error)return r.status(500).json({error:"Could not renew subscription."});
+  const payment=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(planQuery.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  if(payment.error){const rollback=await supabase.from("subscriptions").update({plan_id:sub.data.plan_id,status:sub.data.status,starts_at:sub.data.starts_at,expires_at:sub.data.expires_at,last_renewed_at:sub.data.last_renewed_at,updated_at:sub.data.updated_at}).eq("id",id);if(rollback.error)console.error("Subscription renewal compensation failed:",rollback.error.message);return r.status(500).json({error:"Could not record the renewal payment. The subscription renewal was rolled back where possible."});}
+ r.json({ok:true,subscription:up.data,plan:planQuery.data});
 });
 app.get("/api/desktop/update",async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Desktop login required."});
@@ -212,21 +563,104 @@ app.get("/api/desktop/update",async(q,r)=>{
    if(!/^https:\/\//i.test(url)||!/^[a-f0-9]{64}$/.test(sha))return r.status(500).json({error:"Desktop update manifest is invalid."});
    return r.json({brand:brand.data,version:String(manifest.data.version),download_url:url,sha256:sha,mandatory:manifest.data.mandatory===true,updated_at:manifest.data.updated_at});
  }
- const url=String(process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL||"").trim();
- const sha=String(process.env.CUTDOWN_DESKTOP_SHA256||"").trim().toLowerCase();
+ const url=String((process.env.BPC_DESKTOP_DOWNLOAD_URL||process.env.CUTDOWN_DESKTOP_DOWNLOAD_URL)||"").trim();
+ const sha=String(process.env.BPC_DESKTOP_SHA256||process.env.CUTDOWN_DESKTOP_SHA256||process.env.BPC_DESKTOP_SHA||process.env.CUTDOWN_DESKTOP_SHA||"").trim().toLowerCase();
  if(url&&/^https:\/\//i.test(url)&&/^[a-f0-9]{64}$/.test(sha)){
-   return r.json({brand:brand.data,version:String(process.env.CUTDOWN_DESKTOP_VERSION||"1.0.0"),download_url:url,sha256:sha,mandatory:String(process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY||"false")==="true"});
+   return r.json({brand:brand.data,version:String((process.env.BPC_DESKTOP_VERSION||process.env.CUTDOWN_DESKTOP_VERSION)||"1.0.0"),download_url:url,sha256:sha,mandatory:String((process.env.BPC_DESKTOP_UPDATE_MANDATORY||process.env.CUTDOWN_DESKTOP_UPDATE_MANDATORY)||"false")==="true"});
  }
  return r.status(404).json({error:"No desktop update is configured for this brand/channel."});
 });
-app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,settings:brand.settings&&typeof brand.settings==="object"?brand.settings:{}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
-app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
+app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const settings=brand.settings&&typeof brand.settings==="object"?brand.settings:{};r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,settings,supportWhatsApp:String(process.env.BPC_SUPPORT_WHATSAPP||"").trim(),instapay:{address:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),name:String(process.env.BPC_INSTAPAY_NAME||"").trim(),bank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),account:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim()}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
+app.post("/api/auth/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"customer-signup"}),async(q,r)=>{
+ if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
+ const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),slug=String(q.body?.brand_slug||"").trim().toLowerCase();
+ if(!email||password.length<8||!name)return r.status(400).json({error:"Name, valid email, and password (8+ characters) are required."});
+ if(name.length>120||email.length>254||phone.length>40)return r.status(400).json({error:"One or more account fields are too long."});
+ const brand=slug?await supabase.from("brands").select("id,slug,active").eq("slug",slug).eq("active",true).maybeSingle():{data:null,error:null};
+ if(brand.error)return r.status(503).json({error:"Could not verify store brand."});
+ if(!brand.data)return r.status(404).json({error:"Store brand not found or inactive. Refresh the store and try again."});
+ const signed=await authClient.auth.signUp({email,password,options:{data:{name,phone,brand_slug:brand.data.slug}}});
+ if(signed.error)return r.status(400).json({error:signed.error.message});
+ if(!signed.data?.user)return r.status(400).json({error:"Account could not be created."});
+ r.status(201).json({user:{id:signed.data.user.id,email:signed.data.user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session});
+});
+app.get("/api/auth/me",async(q,r)=>{
+ const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
+ const profile=await getAuthProfile(user.id);
+ if(profile?.role==="admin"){
+   const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);if(!gate.ok)return gate.response;
+   return r.json({user:{id:user.id,email:user.email||null},profile,subscription:gate.view});
+ }
+ r.json({user:{id:user.id,email:user.email||null},profile,subscription:null});
+});
 
 async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return null;return {user,profile};}
-app.get("/api/admin/ping",async(q,r)=>{const admin=await requireBrandAdmin(q,r);if(!admin)return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:admin.profile.brand_id})});
+async function requireTenantAdmin(req,res){const user=await getAuthUser(req);if(!user)return res.status(401).json({error:"Sign in to continue."});const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return res.status(403).json({error:"Company administrator access required."});const brand=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",profile.brand_id).maybeSingle();if(brand.error)return res.status(503).json({error:"Could not verify company access."});if(!brand.data?.active)return res.status(403).json({error:"This company is inactive."});const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,res);if(!gate.ok)return gate.response;req.tenant={user,profile,brand:brand.data,brandId:String(profile.brand_id),subscription:gate.view};return null;}
+app.get("/api/app/session",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const profile=await ensureSubscriberWorkspace(q.tenant.user,q.tenant.profile);if(String(profile.brand_id)!==String(q.tenant.brandId)){const brand=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",profile.brand_id).maybeSingle();if(brand.data){q.tenant.profile=profile;q.tenant.brand=brand.data;q.tenant.brandId=String(profile.brand_id);}}r.json({user:{id:q.tenant.user.id,email:q.tenant.user.email||null},profile:q.tenant.profile,brand:q.tenant.brand});});
+app.get("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const b=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).maybeSingle();if(b.error)return r.status(500).json({error:"Could not load settings."});r.json({settings:b.data?.settings||{}});});
+app.patch("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const settings=q.body?.settings;if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","backgroundColor","sidebarColor","storeMode","websiteUrl","heroImageUrl","heroTitle","heroSubtitle","heroEyebrow","storyTitle","storyText","aboutText","instagramUrl","facebookUrl","whatsappUrl","tiktokUrl","contactEmail","customDomain","templateId"];const clean={};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(settings,key))clean[key]=settings[key];const websiteUrl=String(clean.websiteUrl||"").trim(); if(clean.storeMode==="external"&&websiteUrl&&!/^https:\/\//i.test(websiteUrl))return r.status(400).json({error:"Website URL must use https://"}); const u=await supabase.from("brands").update({settings:clean,website_url:clean.storeMode==="external"?(websiteUrl||null):null,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings,website_url").single();if(u.error)return r.status(500).json({error:"Could not save settings."});r.json({settings:u.data.settings||{},website_url:u.data.website_url||null});});
+app.post("/api/app/store-asset",rateLimit({windowMs:60*1000,max:10,keyPrefix:"store-asset"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const kind=String(q.body?.kind||"").trim(),encoded=String(q.body?.data_base64||"").trim();
+ if(!["logo","hero"].includes(kind)||!encoded)return r.status(400).json({error:"Store asset kind and image are required."});
+ const bytes=Buffer.from(encoded,"base64");if(!bytes.length||bytes.length>3145728)return r.status(413).json({error:"Store image must be smaller than 3 MB."});
+ const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Use a valid JPG, PNG, GIF or WebP image."});
+ const storagePath="brands/"+safeFileName(q.tenant.brandId)+"/store/"+kind;
+ const uploaded=await supabase.storage.from("product-images").upload(storagePath,bytes,{contentType:detected.mime,upsert:true});
+ if(uploaded.error)return r.status(500).json({error:"Could not upload store image."});
+ const url=supabase.storage.from("product-images").getPublicUrl(storagePath).data.publicUrl;
+ const key=kind==="logo"?"logoUrl":"heroImageUrl";
+ const current=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).single();
+ if(current.error)return r.status(500).json({error:"Could not load store settings."});
+ const settings={...(current.data?.settings||{}),[key]:url};
+ const saved=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings").single();
+ if(saved.error)return r.status(500).json({error:"Image uploaded but could not save store settings."});
+ r.status(201).json({url,settings:saved.data.settings||{}});
+});
+app.post("/api/app/product-image",rateLimit({windowMs:60*1000,max:20,keyPrefix:"product-image"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const productId=String(q.body?.product_id||"").trim(),encoded=String(q.body?.data_base64||"").trim();
+ if(!productId||!encoded)return r.status(400).json({error:"Product and image data are required."});
+ const owned=await supabase.from("products").select("id").eq("id",productId).eq("brand_id",q.tenant.brandId).maybeSingle();
+ if(owned.error)return r.status(500).json({error:"Could not verify product."});if(!owned.data)return r.status(404).json({error:"Product not found for this brand."});
+ const bytes=Buffer.from(encoded,"base64");if(!bytes.length||bytes.length>1572864)return r.status(413).json({error:"Image must be smaller than 1.5 MB."});
+ const detected=detectImage(bytes);if(!detected)return r.status(415).json({error:"Use a valid JPG, PNG, GIF or WebP image."});
+ const storagePath="brands/"+safeFileName(q.tenant.brandId)+"/web/"+safeFileName(productId)+"/primary";
+ const uploaded=await supabase.storage.from("product-images").upload(storagePath,bytes,{contentType:detected.mime,upsert:true});
+ if(uploaded.error)return r.status(500).json({error:"Could not upload product image."});
+ const imageUrl=supabase.storage.from("product-images").getPublicUrl(storagePath).data.publicUrl;
+ const saved=await supabase.from("products").update({image_url:imageUrl,updated_at:new Date().toISOString()}).eq("id",productId).eq("brand_id",q.tenant.brandId).select("id,image_url").single();
+ if(saved.error)return r.status(500).json({error:"Image uploaded but could not be assigned to product."});
+ // Keep the normalized product_images record in sync with image_url so the public storefront
+ // can use the same image source as the admin panel and desktop sync.
+ const oldImages=await supabase.from("product_images").select("storage_path").eq("brand_id",q.tenant.brandId).eq("product_id",productId).like("storage_path","brands/"+safeFileName(q.tenant.brandId)+"/web/"+safeFileName(productId)+"/%");
+ if(oldImages.error)return r.status(500).json({error:"Image assigned but image index could not be updated."});
+ const stalePaths=(oldImages.data||[]).map(x=>x.storage_path).filter(Boolean).filter(x=>x!==storagePath);
+ if(stalePaths.length)await supabase.storage.from("product-images").remove(stalePaths);
+ const removedRows=await supabase.from("product_images").delete().eq("brand_id",q.tenant.brandId).eq("product_id",productId).like("storage_path","brands/"+safeFileName(q.tenant.brandId)+"/web/"+safeFileName(productId)+"/%");
+ if(removedRows.error)return r.status(500).json({error:"Image assigned but image index could not be updated."});
+ const imageRow=await supabase.from("product_images").insert({
+   brand_id:q.tenant.brandId,product_id:productId,storage_path:storagePath,public_url:imageUrl,
+   alt_text:saved.data?.name||"Product image",sort_order:0,is_primary:true,color:""
+ });
+ if(imageRow.error)return r.status(500).json({error:"Image assigned but storefront image index could not be saved."});
+ r.status(201).json(saved.data);
+});
+app.get("/api/app/products",rateLimit({windowMs:60*1000,max:90,keyPrefix:"app-products"}),async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const brandId=q.tenant.brandId;const p=await supabase.from("products").select("id,desktop_id,sku,name,category,description,price,cost_price,stock,minimum_stock,active,is_active,image_url,created_at,updated_at").eq("brand_id",brandId).order("created_at",{ascending:false}).limit(500);if(p.error)return r.status(503).json({error:"Could not load company products."});const ids=(p.data||[]).map(x=>x.id);if(!ids.length)return r.json({products:[]});const [v,i]=await Promise.all([supabase.from("product_variants").select("id,product_id,sku,size,color,stock,active").eq("brand_id",brandId).in("product_id",ids),supabase.from("product_images").select("id,product_id,public_url,storage_path,alt_text,sort_order,color,is_primary").eq("brand_id",brandId).in("product_id",ids).order("sort_order")]);if(v.error||i.error)return r.status(503).json({error:"Could not load product details."});const vm=new Map(),im=new Map();for(const x of v.data||[]){if(!vm.has(x.product_id))vm.set(x.product_id,[]);vm.get(x.product_id).push(x);}for(const x of i.data||[]){if(!im.has(x.product_id))im.set(x.product_id,[]);im.get(x.product_id).push(x);}r.json({products:(p.data||[]).map(x=>({...x,variants:vm.get(x.id)||[],images:im.get(x.id)||[]}))});});
+app.post("/api/app/inventory/adjust",rateLimit({windowMs:60*1000,max:60,keyPrefix:"inventory-adjust"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const inventoryId=String(q.body?.inventory_id||"").trim(),quantity=Number(q.body?.quantity);
+ if(!inventoryId||!Number.isSafeInteger(quantity)||quantity<0)return r.status(400).json({error:"Inventory row and a non-negative whole quantity are required."});
+ const result=await supabase.rpc("adjust_inventory_stock",{p_inventory_id:inventoryId,p_quantity:quantity,p_brand_id:q.tenant.brandId});
+ if(result.error){const msg=String(result.error.message||"");if(msg.includes("INVENTORY_NOT_FOUND"))return r.status(404).json({error:"Inventory row not found for this brand."});if(msg.includes("PRODUCT_USES_VARIANTS"))return r.status(409).json({error:"This product uses sizes/colors. Adjust stock on each variant instead."});if(msg.includes("INVALID_VARIANT_STOCK")||msg.includes("INVALID_PRODUCT_STOCK"))return r.status(409).json({error:"The adjustment would make stock negative."});if(msg.includes("INVALID_INVENTORY_QUANTITY"))return r.status(400).json({error:"Invalid stock quantity."});return r.status(500).json({error:"Could not adjust inventory."});}
+ r.json({ok:true,inventory:result.data});
+});
+app.get("/api/app/inventory",rateLimit({windowMs:60*1000,max:90,keyPrefix:"app-inventory"}),async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const brandId=q.tenant.brandId;const [s,w]=await Promise.all([supabase.from("inventory").select("id,product_id,variant_id,warehouse_id,quantity,updated_at").eq("brand_id",brandId).order("updated_at",{ascending:false}).limit(2000),supabase.from("warehouses").select("id,desktop_id,name,location,active").eq("brand_id",brandId).order("name")]);if(s.error||w.error)return r.status(503).json({error:"Could not load company inventory."});const pids=[...new Set((s.data||[]).map(x=>x.product_id))],vids=[...new Set((s.data||[]).map(x=>x.variant_id).filter(Boolean))];const [p,v]=await Promise.all([pids.length?supabase.from("products").select("id,name,sku,minimum_stock").eq("brand_id",brandId).in("id",pids):Promise.resolve({data:[],error:null}),vids.length?supabase.from("product_variants").select("id,size,color,sku").eq("brand_id",brandId).in("id",vids):Promise.resolve({data:[],error:null})]);if(p.error||v.error)return r.status(503).json({error:"Could not resolve inventory items."});const pm=new Map((p.data||[]).map(x=>[x.id,x])),vm=new Map((v.data||[]).map(x=>[x.id,x])),wm=new Map((w.data||[]).map(x=>[x.id,x]));r.json({warehouses:w.data||[],items:(s.data||[]).map(x=>({...x,product:pm.get(x.product_id)||null,variant:x.variant_id?vm.get(x.variant_id)||null:null,warehouse:wm.get(x.warehouse_id)||null}))});});
+
+app.get("/api/admin/ping",async(q,r)=>{const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;r.json({ok:true,admin:true,super_admin:true})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const accountProfile=await getAuthProfile(user.id);if(!accountProfile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});let accountBrand;try{accountBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!accountBrand?.active||String(accountBrand.id)!==String(accountProfile.brand_id))return r.status(403).json({error:"This account does not belong to this store."});
+ const accountProfile=await getAuthProfile(user.id); if(!accountProfile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
  const {name,phone,city,address}=q.body||{};const patch={};
  if(name!==undefined)patch.name=String(name).trim();if(phone!==undefined)patch.phone=String(phone).trim();if(city!==undefined)patch.city=String(city).trim();if(address!==undefined)patch.address=String(address).trim();
@@ -237,20 +671,86 @@ app.post("/api/account/profile",async(q,r)=>{
 app.get("/api/account/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
  let customer;try{customer=await ensureCustomerForUser(user)}catch(e){return r.status(500).json({error:"Could not load customer profile."})}
- const profile=await getAuthProfile(user.id);if(!profile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});let accountBrand;try{accountBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!accountBrand?.active||String(accountBrand.id)!==String(profile.brand_id))return r.status(403).json({error:"This account does not belong to this store."});
+ const profile=await getAuthProfile(user.id); if(!profile?.brand_id)return r.status(403).json({error:"This account is not assigned to a brand."});
  const orders=await supabase.from("orders").select("*,order_items(*)").eq("brand_id",String(profile.brand_id)).eq("customer_id",customer.id).order("created_at",{ascending:false}).limit(50);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json({customer,orders:orders.data||[]});
 });
 app.get("/api/admin/orders",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile.brand_id)return r.status(403).json({error:"Admin access required."});
- const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",profile.brand_id).eq("source","website").order("created_at",{ascending:false}).limit(100);
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
+ const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
+ const brandId=String(profile.brand_id);
+ const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).limit(500);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
+});
+app.post("/api/app/orders",rateLimit({windowMs:5*60*1000,max:30,keyPrefix:"tenant-admin-orders"}),async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const brandId=q.tenant.brandId,{customer,items}=q.body||{};
+ if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Customer name, phone, address and at least one product are required."});
+ if(items.length>50||items.some(i=>!i?.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order items."});
+ const productIds=[...new Set(items.map(i=>String(i.product_id)))],variantIds=[...new Set(items.map(i=>String(i.variant_id||"")).filter(Boolean))];
+ const products=await supabase.from("products").select("id,name,price,cost_price,stock,active").eq("brand_id",brandId).in("id",productIds);
+ if(products.error)return r.status(500).json({error:"Could not load products."});
+ const variants=variantIds.length?await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds):{data:[],error:null};
+ if(variants.error)return r.status(500).json({error:"Could not load product variants."});
+ const pm=new Map((products.data||[]).map(p=>[p.id,p])),vm=new Map((variants.data||[]).map(v=>[v.id,v]));
+ let subtotal=0;const clean=[];
+ for(const item of items){
+  const p=pm.get(String(item.product_id)),qty=Number(item.quantity),v=item.variant_id?vm.get(String(item.variant_id)):null;
+  if(!p||!p.active||!Number.isSafeInteger(qty)||qty<1||qty>100||item.variant_id&&(!v||v.product_id!==p.id||!v.active))return r.status(409).json({error:"A selected product or variant is unavailable."});
+  subtotal+=Number(p.price||0)*qty;
+  clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:qty,unit_price:Number(p.price||0),cost_price:Number(p.cost_price||0),size:v?.size||item.size||null,color:v?.color||item.color||null});
+ }
+ const shipping=Number(q.body?.shipping_amount||0),discount=Number(q.body?.discount||0);
+ if(!Number.isFinite(shipping)||shipping<0||!Number.isFinite(discount)||discount<0||discount>subtotal+shipping)return r.status(400).json({error:"Invalid shipping or discount amount."});
+ const total=subtotal+shipping-discount;
+ const phone=String(customer.phone).trim();
+ let customerId=null;
+ const existing=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
+ if(existing.error)return r.status(500).json({error:"Could not look up customer."});
+ const customerPatch={name:String(customer.name).trim(),phone,email:String(customer.email||"").trim()||null,city:String(customer.city||"").trim()||null,address:String(customer.address).trim(),updated_at:new Date().toISOString()};
+ if(existing.data?.id){
+  const cu=await supabase.from("customers").update(customerPatch).eq("id",existing.data.id).eq("brand_id",brandId).select("id").single();
+  if(cu.error)return r.status(500).json({error:"Could not update customer."});customerId=cu.data.id;
+ }else{
+  const cu=await supabase.from("customers").insert({...customerPatch,brand_id:brandId}).select("id").single();
+  if(cu.error)return r.status(500).json({error:"Could not create customer."});customerId=cu.data.id;
+ }
+ const reservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
+ const reserved=await supabase.rpc("reserve_stock_items",{p_items:reservation});
+ if(reserved.error)return r.status(409).json({error:"Not enough stock for this order."});
+ const order=await supabase.from("orders").insert({brand_id:brandId,customer_id:customerId,customer_name:customerPatch.name,customer_phone:phone,customer_email:customerPatch.email,city:customerPatch.city,address:customerPatch.address,notes:String(customer.notes||"").trim()||null,payment_method:"cod",payment_status:"pending",order_status:"Not Prepared",delivery_status:"Pending",total_amount:total,discount,shipping_amount:shipping,source:"website",stock_reserved:true}).select("id").single();
+ if(order.error){await supabase.rpc("release_stock_items",{p_items:reservation});return r.status(500).json({error:"Could not create order."});}
+ const inserted=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.data.id,brand_id:brandId})));
+ if(inserted.error){await supabase.rpc("release_stock_items",{p_items:reservation});await supabase.from("orders").delete().eq("id",order.data.id).eq("brand_id",brandId);return r.status(500).json({error:"Could not save order items."});}
+ r.status(201).json({ok:true,order_id:order.data.id,total_amount:total});
+});
+app.post("/api/app/orders/return",async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const {order_id,reason,disposition,amount,loss}=q.body||{};
+ if(!order_id)return r.status(400).json({error:"Missing order_id."});
+ const owned=await supabase.from("orders").select("id").eq("id",order_id).eq("brand_id",q.tenant.brandId).eq("source","website").maybeSingle();
+ if(owned.error)return r.status(500).json({error:"Could not verify order ownership."});
+ if(!owned.data)return r.status(404).json({error:"Website order not found."});
+ const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:String(disposition||"Return to Stock"),p_refund_amount:Number(amount||0),p_loss:Number(loss||0)});
+ if(result.error){
+  const msg=String(result.error.message||"");
+  if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
+  if(msg.includes("INVALID_RETURN_DISPOSITION"))return r.status(400).json({error:"Invalid return disposition."});
+  if(msg.includes("INVALID_RETURN_REFUND_AMOUNT")||msg.includes("INVALID_REFUND_AMOUNT"))return r.status(400).json({error:"Refund amount must not exceed the order total."}); if(msg.includes("RETURN_REASON_DISPOSITION_MISMATCH"))return r.status(400).json({error:"The selected return reason requires a different stock disposition."});
+  if(msg.includes("INVALID_LOSS_AMOUNT"))return r.status(400).json({error:"Invalid loss amount."});
+  if(msg.includes("ORDER_NOT_CONFIRMED"))return r.status(409).json({error:"Order is not confirmed for return."});
+  if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
+  return r.status(500).json({error:"Could not process return."});
+ }
+ r.json({ok:true,processed:result.data===true});
 });
 app.post("/api/admin/orders/status",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
- const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile.brand_id)return r.status(403).json({error:"Admin access required."});
- const brandId=String(profile.brand_id);const {order_id,order_status,delivery_status}=q.body||{};if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
+ const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
+ const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
+ const brandId=String(profile.brand_id);
+ const {order_id,order_status,delivery_status}=q.body||{};if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
  const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
  const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
  if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
@@ -260,13 +760,102 @@ app.post("/api/admin/orders/status",async(q,r)=>{
  if(updated.error)return r.status(500).json({error:"Internal server error."});if(!updated.data)return r.status(404).json({error:"Website order not found."});r.json({ok:true,order:updated.data});
 });
 
+/* BPC system API — tenant-scoped management surface. */
+app.use("/api/system",rateLimit({windowMs:60*1000,max:120,keyPrefix:"system-api"}));
+const SYSTEM_TABLES={
+  products:["id","desktop_id","sku","name","slug","category","description","image_url","price","cost_price","stock","minimum_stock","active","is_active","created_at","updated_at"],
+  product_variants:["id","product_id","desktop_variant_id","sku","size","color","stock","active","created_at","updated_at"],
+  warehouses:["id","desktop_id","name","location","active","created_at","updated_at"],
+  inventory:["id","product_id","variant_id","warehouse_id","quantity","updated_at"],
+  customers:["id","auth_user_id","desktop_id","name","email","phone","additional_phone","city","address","status","total_orders","total_spent","last_order_at","created_at","updated_at"],
+  orders:["id","desktop_id","customer_id","customer_name","customer_phone","customer_email","city","address","notes","payment_method","payment_status","order_status","delivery_status","total_amount","discount","source","shipping_amount","stock_reserved","created_at","updated_at"],
+  order_items:["id","order_id","product_id","product_name","quantity","unit_price","cost_price","size","color","variant_id","desktop_id","brand_id"],
+  returns:["id","desktop_id","order_id","customer_id","return_type","reason","disposition","refund_amount","loss","created_at","processed_at","notes"],
+  expenses:["id","desktop_id","amount","category","description","payment_method","status","expense_date","created_at","updated_at"]
+};
+const SYSTEM_WRITE_TABLES=new Set(["products","product_variants","warehouses","inventory","customers","expenses"]);
+async function requireSystemAdmin(q,r){
+  if(!supabase)return {ok:false,response:r.status(503).json({error:"Supabase is not configured."})};
+  const user=await getAuthUser(q); if(!user)return {ok:false,response:r.status(401).json({error:"Not authenticated."})};
+  const profile=await getAuthProfile(user.id);
+  if(profile?.role!=="admin"||!profile?.brand_id)return {ok:false,response:r.status(403).json({error:"Company administrator access required."})};
+  const sub=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,r);if(!sub.ok)return sub;
+  q.systemUser=user;q.brandId=String(profile.brand_id);q.subscription=sub.view;return {ok:true,user,profile,subscription:sub.view};
+}
+function systemColumns(table,obj){const allowed=new Set(SYSTEM_TABLES[table]||[]);const out={};for(const [k,v] of Object.entries(obj||{}))if(allowed.has(k)&&k!=="id"&&k!=="brand_id"&&k!=="created_at"&&k!=="updated_at")out[k]=v;return out}
+app.get("/api/system/summary",async(q,r)=>{
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const tables=["products","product_variants","warehouses","inventory","customers","orders","returns","expenses"];
+  const results=await Promise.all(tables.map(table=>supabase.from(table).select("id",{count:"exact",head:true}).eq("brand_id",q.brandId)));
+  const bad=results.find(x=>x.error);if(bad)return r.status(500).json({error:"Could not load system summary."});
+  const counts={};tables.forEach((table,i)=>{counts[table]=results[i].count||0});
+  const revenue=await supabase.from("orders").select("total_amount").eq("brand_id",q.brandId).neq("order_status","cancelled");
+  if(revenue.error)return r.status(500).json({error:"Could not load system summary."});
+  r.json({counts,revenue:(revenue.data||[]).reduce((n,x)=>n+Number(x.total_amount||0),0)});
+});
+app.get("/api/system/:table",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_TABLES[table])return r.status(404).json({error:"Unknown system resource."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).limit(limit);
+  const search=String(q.query.search||"").trim();if(search&&["products","customers","warehouses","expenses"].includes(table)){const field=table==="products"?"name":table==="customers"?"name":table==="warehouses"?"name":"description";query=query.ilike(field,"%"+search.replace(/[%_]/g,"") +"%")}
+  query=query.order(table==="inventory"?"updated_at":"created_at",{ascending:false});
+  const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});r.json(result.data||[]);
+});
+app.post("/api/system/:table",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const row=systemColumns(table,q.body);row.brand_id=q.brandId;
+  if(table==="products"){
+    if(!String(row.name||"").trim())return r.status(400).json({error:"Product name is required."});
+    row.name=String(row.name).trim();
+    row.slug=String(row.slug||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,90)||("product-"+Date.now());
+    row.price=Number(row.price??0);row.cost_price=Number(row.cost_price??0);if(!Number.isFinite(row.price)||row.price<0||!Number.isFinite(row.cost_price)||row.cost_price<0)return r.status(400).json({error:"Prices must be valid non-negative numbers."});
+    row.stock=Number(row.stock??0);row.minimum_stock=Number(row.minimum_stock??0);if(!Number.isSafeInteger(row.stock)||row.stock<0||!Number.isSafeInteger(row.minimum_stock)||row.minimum_stock<0)return r.status(400).json({error:"Stock and minimum stock must be whole non-negative numbers."});
+    row.active=row.active!==false;row.is_active=row.active;
+  }
+  if(table==="warehouses"&&!String(row.name||"").trim())return r.status(400).json({error:"Warehouse name is required."});
+  if(table==="customers"&&!String(row.name||"").trim())return r.status(400).json({error:"Customer name is required."});
+  if(table==="product_variants"){row.stock=Number(row.stock??0);if(!row.product_id)return r.status(400).json({error:"Select a product for this variant."});if(!String(row.size||"").trim()&&!String(row.color||"").trim())return r.status(400).json({error:"A variant needs a size or color."});if(!Number.isSafeInteger(row.stock)||row.stock<0)return r.status(400).json({error:"Variant stock must be a whole non-negative number."});const owner=await supabase.from("products").select("id").eq("id",row.product_id).eq("brand_id",q.brandId).maybeSingle();if(owner.error||!owner.data)return r.status(400).json({error:"Product does not belong to this brand."});}
+  const ins=await supabase.from(table).insert(row).select(SYSTEM_TABLES[table].join(",")).single();if(ins.error)return r.status(400).json({error:"Could not create "+table+" record.",detail:ins.error.message});if(table==="products"){let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();if(wh.error)return r.status(500).json({error:"Product created but warehouse lookup failed."});if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Product created but main warehouse could not be created."});wh={data:nw.data}}const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});if(inv.error)return r.status(500).json({error:"Product created but inventory could not be initialized."});}
+  if(table==="product_variants"){
+    const product=await supabase.from("products").select("id").eq("id",row.product_id).eq("brand_id",q.brandId).maybeSingle();
+    if(product.error||!product.data){await supabase.from("product_variants").delete().eq("id",ins.data.id).eq("brand_id",q.brandId);return r.status(400).json({error:"Product does not belong to this brand."});}
+    let wh=await supabase.from("warehouses").select("id").eq("brand_id",q.brandId).eq("active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();
+    if(wh.error)return r.status(500).json({error:"Variant created but warehouse lookup failed."});
+    if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Variant created but warehouse could not be created."});wh={data:nw.data};}
+    const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:row.product_id,variant_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});
+    if(inv.error){await supabase.from("product_variants").delete().eq("id",ins.data.id).eq("brand_id",q.brandId);return r.status(500).json({error:"Could not initialize variant inventory."});}
+    const base=await supabase.from("inventory").update({quantity:0,updated_at:new Date().toISOString()}).eq("brand_id",q.brandId).eq("product_id",row.product_id).is("variant_id",null);
+    if(base.error)return r.status(500).json({error:"Variant inventory created but base stock could not be reconciled."});
+    const all=await supabase.from("product_variants").select("stock").eq("brand_id",q.brandId).eq("product_id",row.product_id).eq("active",true);
+    if(all.error)return r.status(500).json({error:"Could not calculate product stock."});
+    const total=(all.data||[]).reduce((n,x)=>n+Number(x.stock||0),0);
+    const synced=await supabase.from("products").update({stock:total,updated_at:new Date().toISOString()}).eq("id",row.product_id).eq("brand_id",q.brandId);
+    if(synced.error)return r.status(500).json({error:"Could not sync product stock."});
+  }
+  r.status(201).json(ins.data);
+});
+app.patch("/api/system/:table/:id",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const patch=systemColumns(table,q.body);patch.updated_at=new Date().toISOString();if(table==="products"){if("name" in patch&&!String(patch.name||"").trim())return r.status(400).json({error:"Product name is required."});for(const key of ["price","cost_price"])if(key in patch&&(!Number.isFinite(Number(patch[key]))||Number(patch[key])<0))return r.status(400).json({error:"Prices must be valid non-negative numbers."});for(const key of ["stock","minimum_stock"])if(key in patch&&(!Number.isSafeInteger(Number(patch[key]))||Number(patch[key])<0))return r.status(400).json({error:"Stock and minimum stock must be whole non-negative numbers."});}if(table==="product_variants"){if("stock" in patch&&(!Number.isSafeInteger(Number(patch.stock))||Number(patch.stock)<0))return r.status(400).json({error:"Variant stock must be a whole non-negative number."});if(("size" in patch||"color" in patch)&&!String(patch.size??"").trim()&&!String(patch.color??"").trim())return r.status(400).json({error:"A variant needs a size or color."});}
+  const up=await supabase.from(table).update(patch).eq("id",q.params.id).eq("brand_id",q.brandId).select(SYSTEM_TABLES[table].join(",")).maybeSingle();if(up.error)return r.status(400).json({error:"Could not update record.",detail:up.error.message});if(!up.data)return r.status(404).json({error:"Record not found."});if(table==="product_variants"){const variants=await supabase.from("product_variants").select("stock").eq("brand_id",q.brandId).eq("product_id",up.data.product_id).eq("active",true);if(variants.error)return r.status(500).json({error:"Variant saved, but product stock could not be recalculated."});const total=(variants.data||[]).reduce((n,v)=>n+Number(v.stock||0),0);const synced=await supabase.from("products").update({stock:total,updated_at:new Date().toISOString()}).eq("id",up.data.product_id).eq("brand_id",q.brandId);if(synced.error)return r.status(500).json({error:"Variant saved, but product stock could not be synchronized."});}r.json(up.data);
+});
+app.delete("/api/system/:table/:id",async(q,r)=>{
+  const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
+  const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
+  const del=await supabase.from(table).delete().eq("id",q.params.id).eq("brand_id",q.brandId);if(del.error)return r.status(400).json({error:"Could not delete record.",detail:del.error.message});r.json({ok:true});
+});
+
 /* Railway healthcheck: keep this endpoint lightweight and independent of external services.
    The application can still report Supabase failures through its normal API endpoints. */
-app.get("/api/health",(_q,r)=>r.status(200).json({ok:true,service:"cutdown-store"}));
+app.get("/api/health",(_q,r)=>r.status(200).json({ok:true,service:"bpc-clothes-system"}));
 
 app.get("/api/products",async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
- let publicBrand;try{publicBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!publicBrand)return r.status(404).json({error:"Store brand not found or inactive."});const brandId=String(publicBrand.id); const {data,error}=await supabase.from("products").select("*").eq("brand_id",brandId).eq("active",true).order("created_at",{ascending:false});
+ let brand;try{brand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}
+ if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});
+ const brandId=String(brand.id); const {data,error}=await supabase.from("products").select("*").eq("brand_id",brandId).eq("active",true).order("created_at",{ascending:false});
  if(error)return r.status(500).json({error:"Could not load products."});const products=data||[],ids=products.map(p=>p.id);if(!ids.length)return r.json([]);
  const {data:variants}=await supabase.from("product_variants").select("id,product_id,desktop_variant_id,sku,size,color,stock,active").eq("brand_id",brandId).in("product_id",ids).eq("active",true);
  const {data:images}=await supabase.from("product_images").select("id,product_id,storage_path,public_url,alt_text,sort_order,color").eq("brand_id",brandId).in("product_id",ids).order("sort_order",{ascending:true});
@@ -275,58 +864,92 @@ app.get("/api/products",async(q,r)=>{
 });
 app.get("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});let brand;try{brand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const {data,error}=await supabase.from("reviews").select("*").eq("brand_id",brand.id).eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:"Could not load reviews."});r.set("Cache-Control","public, max-age=30, stale-while-revalidate=60");r.json(data||[])});
 app.post("/api/reviews",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"reviews"}),async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});let brand;try{brand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({brand_id:brand.id,name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:"Could not save review."});r.status(201).json(data)});
-async function findOrCreateCustomer(customer,brandId){
+async function findOrCreateCustomer(customer,brandId=configuredBrandId()){
  if(!supabase||!customer?.phone)return null;
  const phone=String(customer.phone).trim();if(!phone)return null;
  const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};
  const found=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
  if(found.error)throw found.error;
- if(found.data?.id)return found.data.id;
+ if(found.data?.id){
+   // Guest checkout may reuse an existing customer, but must not overwrite their profile.
+   return found.data.id;
+ }
  const created=await supabase.from("customers").insert({...payload,brand_id:brandId}).select("id").single();
  if(!created.error&&created.data?.id)return created.data.id;
  if(created.error){
    const retry=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
    if(retry.error)throw retry.error;
-   if(retry.data?.id)return retry.data.id;
+   if(retry.data?.id){
+     // Reuse the concurrently-created customer without changing their profile.
+     return retry.data.id;
+   }
    throw created.error;
  }
  return null;
 }
 app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"}),async(q,r)=>{
-  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
-  const {customer,items}=q.body||{};
-  let publicBrand;try{publicBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}
-  if(!publicBrand)return r.status(404).json({error:"Store brand not found or inactive."});
-  const brandId=String(publicBrand.id),requestId=String(q.body?.request_id||"").trim();
-  if(requestId&&!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId))return r.status(400).json({error:"Invalid checkout request ID."});
-  if(requestId){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.error)return r.status(500).json({error:"Could not check the previous order request."});if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}
+ if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
+ const {customer,items,payment_method}=q.body||{};
+ let publicBrand;try{publicBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}
+ if(!publicBrand)return r.status(404).json({error:"Store brand not found or inactive."});
+ const brandId=String(publicBrand.id);
+  const requestId=String(q.body?.request_id||"").trim();
+  if(requestId&&(!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)))return r.status(400).json({error:"Invalid checkout request ID."});
+  if(requestId){const prior=await supabase.from("orders").select("id,payment_status,order_status").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.error)return r.status(500).json({error:"Could not check the previous order request."});if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}
   if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});
   if(items.length>50)return r.status(400).json({error:"Too many order items."});
   if(items.some(i=>!i||!i.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order item."});
   const fields=[["name",customer.name,120],["phone",customer.phone,40],["address",customer.address,500],["city",customer.city,100],["email",customer.email,254],["notes",customer.notes,1000]];
   if(fields.some(([_,v,max])=>v!==undefined&&String(v).length>max))return r.status(400).json({error:"One or more order fields are too long."});
-  const {data:products,error:pe}=await supabase.from("products").select("id,name,price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));
-  if(pe)return r.status(500).json({error:"Could not load products."});
-  const variantIds=items.map(i=>i.variant_id).filter(Boolean);let variants=[];
-  if(variantIds.length){const vr=await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds);if(vr.error)return r.status(500).json({error:"Internal server error."});variants=vr.data||[]}
-  const map=new Map((products||[]).map(p=>[p.id,p])),vmap=new Map(variants.map(v=>[v.id,v]));let total=0;const clean=[];
-  for(const item of items){const qty=Number(item.quantity),p=map.get(item.product_id),v=item.variant_id?vmap.get(item.variant_id):null;if(!Number.isSafeInteger(qty)||qty<1||qty>100)return r.status(400).json({error:"Invalid quantity."});if(!p||!p.active||(!v&&qty>p.stock)||(v&&(!v.active||v.product_id!==p.id||qty>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});total+=Number(p.price)*qty;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:qty,unit_price:p.price,size:v?.size||item.size||null,color:v?.color||item.color||null})}
-  const stockReservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
-  const authUser=await getAuthUser(q);let customerId=null;
-  if(authUser){const signedProfile=await getAuthProfile(authUser.id);if(!signedProfile?.brand_id||String(signedProfile.brand_id)!==brandId)return r.status(403).json({error:"This account belongs to a different store."});try{const accountCustomer=await ensureCustomerForUser(authUser);if(!accountCustomer?.id)return r.status(403).json({error:"This account is not assigned to a customer record."});customerId=accountCustomer.id;const link=await supabase.from("customers").update({email:customer.email?.trim()||accountCustomer.email||null,phone:customer.phone?.trim()||accountCustomer.phone||null,city:customer.city?.trim()||accountCustomer.city||null,address:customer.address?.trim()||accountCustomer.address||"",name:customer.name?.trim()||accountCustomer.name||"Customer"}).eq("id",customerId).eq("brand_id",brandId).eq("auth_user_id",authUser.id);if(link.error)return r.status(500).json({error:"Could not update customer record."});}catch{return r.status(500).json({error:"Could not load customer record."});}}
-  else{try{customerId=await findOrCreateCustomer(customer,brandId)}catch{return r.status(500).json({error:"Could not link customer record."});}}
-  const reserved=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});
-  if(reserved.error){if(requestId){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}return r.status(409).json({error:"One or more selected sizes are no longer available."});}
-  const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method:"cod",payment_status:"pending",order_status:"confirmed",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0,client_request_id:requestId||null}).select("id").single();
-  if(oe){if(stockReservation.length){const release=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(release.error)console.error("Failed to release stock after order creation error:",release.error.message);}if(requestId){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}return r.status(500).json({error:"Could not create order."});}
-  const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id,brand_id:brandId})));
-  if(ie){if(stockReservation.length){const release=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(release.error)console.error("Failed to release stock after order item error:",release.error.message);}await supabase.from("orders").delete().eq("id",order.id).eq("brand_id",brandId);return r.status(500).json({error:"Could not save order items."});}
-  r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."});
+  if(payment_method!=="cod")return r.status(400).json({error:"Online card payment is disabled. Choose cash on delivery."});
+ const {data:products,error:pe}=await supabase.from("products").select("id,name,price,cost_price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:"Could not load products."});
+ const variantIds=items.map(i=>i.variant_id).filter(Boolean);let variants=[];if(variantIds.length){const vr=await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds);if(vr.error)return r.status(500).json({error:"Internal server error."});variants=vr.data||[]}
+ const map=new Map((products||[]).map(p=>[p.id,p])),vmap=new Map(variants.map(v=>[v.id,v]));let total=0;const clean=[];
+ for(const item of items){const rawQty=Number(item.quantity);if(!Number.isSafeInteger(rawQty)||rawQty<1||rawQty>100)return r.status(400).json({error:"Invalid quantity."});const p=map.get(item.product_id),n=rawQty,v=item.variant_id?vmap.get(item.variant_id):null;if(!p||!p.active||(!v&&n>p.stock)|| (v&&(!v.active||v.product_id!==p.id||n>v.stock)))return r.status(409).json({error:"The selected color or size is unavailable."});total+=Number(p.price)*n;clean.push({product_id:p.id,variant_id:v?.id||null,product_name:p.name,quantity:n,unit_price:p.price,cost_price:Number(p.cost_price||0),size:v?.size||item.size||null,color:v?.color||item.color||null})}
+ const stockReservation=clean.map(i=>({product_id:i.product_id,variant_id:i.variant_id,quantity:i.quantity}));
+ const authUser=await getAuthUser(q);let customerId=null;
+ if(authUser){
+   const accountProfile=await getAuthProfile(authUser.id);
+   if(!accountProfile?.brand_id||String(accountProfile.brand_id)!==brandId)return r.status(403).json({error:"This account belongs to a different brand. Sign out to place an order as a guest."});
+   try{
+     const accountCustomer=await ensureCustomerForUser(authUser);
+     if(!accountCustomer?.id)return r.status(403).json({error:"This account is not assigned to a customer record."});
+     customerId=accountCustomer.id;
+     const link=await supabase.from("customers").update({
+       email:customer.email?.trim()||accountCustomer.email||null,
+       phone:customer.phone?.trim()||accountCustomer.phone||null,
+       city:customer.city?.trim()||accountCustomer.city||null,
+       address:customer.address?.trim()||accountCustomer.address||"",
+       name:customer.name?.trim()||accountCustomer.name||"Customer"
+     }).eq("id",customerId).eq("brand_id",brandId).eq("auth_user_id",authUser.id);
+     if(link.error)return r.status(500).json({error:"Could not update customer record."});
+   }catch(e){return r.status(500).json({error:"Could not load customer record."});}
+ }else{
+   try{customerId=await findOrCreateCustomer(customer,brandId);}
+   catch(e){return r.status(500).json({error:"Could not link customer record."});}
+ }
+ if(stockReservation.length){const reserve=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});if(reserve.error){if(requestId){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."})}return r.status(409).json({error:"One or more selected sizes are no longer available."})}}
+ const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0,client_request_id:requestId||null}).select().single();
+ if(oe&&stockReservation.length){const released=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(released.error)console.error("Failed to release stock after order insert failure:",released.error.message);}
+ if(oe){
+   if(requestId&&oe.code==="23505"){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}
+   return r.status(500).json({error:"Could not create order."});
+ }
+ const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id,brand_id:brandId})));
+  if(ie){
+    if(stockReservation.length)await supabase.rpc("release_stock_items",{p_items:stockReservation});
+    await supabase.from("orders").delete().eq("id",order.id);
+    return r.status(500).json({error:"Could not save order items."});
+  }
+  await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id).eq("brand_id",brandId);
+  return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."});
  });
-app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"index.html")));
+ app.get("/robots.txt",(_q,r)=>{r.type("text/plain").send("User-agent: *\nAllow: /store\nDisallow: /\nDisallow: /app\nDisallow: /admin\nDisallow: /account\nDisallow: /api/\nSitemap: "+base.replace(/\/$/,"")+"/sitemap.xml\n")});
+app.get("/sitemap.xml",(_q,r)=>{const root=(base||"").replace(/\/$/,"");r.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${root}/store</loc></url></urlset>`) });
+app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.get("/app",(_q,r)=>r.sendFile(path.join(__dirname,"app.html")));app.get("/store",(_q,r)=>r.sendFile(path.join(__dirname,"store.html")));app.get("/",(_q,r)=>r.sendFile(path.join(__dirname,"index.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"app.html")));
 const port=process.env.PORT||3000;
-app.use((err,q,r,next)=>{console.error("Unhandled request error:",err?.stack||err);if(r.headersSent)return next(err);r.status(500).json({error:"Internal server error."})});
-const server=app.listen(port,()=>console.log("Cutdown Store listening on "+port));
+app.use((err,q,r,next)=>{if(r.headersSent)return next(err);if(err?.type==="entity.parse.failed"||err?.type==="request.aborted"){if(err.type==="entity.parse.failed")return r.status(400).json({error:"Invalid JSON request body."});return r.status(400).json({error:"Request body was interrupted. Please retry."});}console.error("Unhandled request error:",err?.stack||err);r.status(500).json({error:"Internal server error."})});
+const server=app.listen(port,()=>console.log("BPC Clothes System listening on "+port));
 function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
 process.on("SIGTERM",()=>shutdown("SIGTERM"));
 process.on("SIGINT",()=>shutdown("SIGINT"));
