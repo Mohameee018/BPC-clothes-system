@@ -38,7 +38,7 @@ const mainNav=[["dashboard","Dashboard"],["products","Products"],["inventory","I
 const managementNav=[["returns","Returns"],["expenses","Expenses"],["reports","Reports"],["settings","Settings"]];
 const navItems=[...mainNav,...managementNav];
 function headers(){return {"Content-Type":"application/json",Authorization:"Bearer "+token}}
-function storefrontUrl(){if(!tenantBrand?.slug&&!tenantBrand?.website_url)return "#";if(tenantBrand?.website_url)return tenantBrand.website_url;return "/store?brand="+encodeURIComponent(tenantBrand.slug)}
+function storefrontUrl(){if(!tenantBrand?.slug&&!tenantBrand?.website_url)return "#";if(tenantBrand?.website_url){try{const u=new URL(tenantBrand.website_url,location.origin);if(tenantBrand.slug)u.searchParams.set("brand",tenantBrand.slug);return u.toString()}catch{return "#"}}return "/store?brand="+encodeURIComponent(tenantBrand.slug)}
 function syncStorefrontLink(){const el=$("#storefrontTopLink");if(!el)return;const url=storefrontUrl();el.href=url;el.classList.toggle("hidden",url==="#");el.title=tenantBrand?.name?`فتح متجر ${tenantBrand.name}`:"فتح المتجر"}
 async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{...headers(),...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(r.status===401||r.status===403){if(token){sessionStorage.removeItem("bpc_admin_token");token="";showLogin()}throw Error(d.error||"Session expired.")}if(!r.ok)throw Error(d.error||"Request failed.");return d}
 function showLogin(){$("#login").classList.remove("hidden");$("#app").classList.add("hidden")}
