@@ -871,8 +871,7 @@ async function findOrCreateCustomer(customer,brandId=configuredBrandId()){
  const found=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
  if(found.error)throw found.error;
  if(found.data?.id){
-   const updated=await supabase.from("customers").update(payload).eq("id",found.data.id).select("id").maybeSingle();
-   if(updated.error)throw updated.error;
+   // Guest checkout may reuse an existing customer, but must not overwrite their profile.
    return found.data.id;
  }
  const created=await supabase.from("customers").insert({...payload,brand_id:brandId}).select("id").single();
@@ -881,8 +880,7 @@ async function findOrCreateCustomer(customer,brandId=configuredBrandId()){
    const retry=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
    if(retry.error)throw retry.error;
    if(retry.data?.id){
-     const updated=await supabase.from("customers").update(payload).eq("id",retry.data.id).select("id").maybeSingle();
-     if(updated.error)throw updated.error;
+     // Reuse the concurrently-created customer without changing their profile.
      return retry.data.id;
    }
    throw created.error;
