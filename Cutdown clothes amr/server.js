@@ -281,21 +281,13 @@ async function findOrCreateCustomer(customer,brandId){
  const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};
  const found=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
  if(found.error)throw found.error;
- if(found.data?.id){
-   const updated=await supabase.from("customers").update(payload).eq("id",found.data.id).select("id").maybeSingle();
-   if(updated.error)throw updated.error;
-   return found.data.id;
- }
+ if(found.data?.id)return found.data.id;
  const created=await supabase.from("customers").insert({...payload,brand_id:brandId}).select("id").single();
  if(!created.error&&created.data?.id)return created.data.id;
  if(created.error){
    const retry=await supabase.from("customers").select("id").eq("brand_id",brandId).eq("phone",phone).maybeSingle();
    if(retry.error)throw retry.error;
-   if(retry.data?.id){
-     const updated=await supabase.from("customers").update(payload).eq("id",retry.data.id).select("id").maybeSingle();
-     if(updated.error)throw updated.error;
-     return retry.data.id;
-   }
+   if(retry.data?.id)return retry.data.id;
    throw created.error;
  }
  return null;
