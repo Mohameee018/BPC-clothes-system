@@ -930,7 +930,7 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
    try{customerId=await findOrCreateCustomer(customer,brandId);}
    catch(e){return r.status(500).json({error:"Could not link customer record."});}
  }
- if(stockReservation.length){const reserve=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});if(reserve.error)return r.status(409).json({error:"One or more selected sizes are no longer available."})}
+ if(stockReservation.length){const reserve=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});if(reserve.error){if(requestId){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."})}return r.status(409).json({error:"One or more selected sizes are no longer available."})}}
  const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0,client_request_id:requestId||null}).select().single();
  if(oe&&stockReservation.length){const released=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(released.error)console.error("Failed to release stock after order insert failure:",released.error.message);}
  if(oe){
