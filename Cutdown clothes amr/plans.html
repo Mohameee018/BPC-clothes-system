@@ -32,6 +32,8 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
 .plan-duration{color:#8ee9b1;font-size:13px;margin:0 0 18px}
 .plan-price{font-size:38px;font-weight:600;letter-spacing:-.04em;margin:0}
 .plan-price small{font-size:12px;font-weight:400;color:rgba(247,251,248,.5)}
+.plan-old-price{display:inline-block;margin:0 0 7px;color:rgba(247,251,248,.46);font-size:15px;text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:rgba(247,251,248,.55)}
+.plan-discount{display:inline-flex;align-items:center;margin-inline-start:8px;padding:4px 8px;border-radius:999px;background:rgba(142,233,177,.12);border:1px solid rgba(142,233,177,.2);color:#8ee9b1;font-size:10px;font-weight:700;text-decoration:none}
 .plan-copy{color:rgba(247,251,248,.64);line-height:1.6;font-size:13px;margin:14px 0 22px}
 .plan-card .plan-btn{margin-top:auto;display:flex;align-items:center;justify-content:center;border-radius:14px;padding:13px 16px;background:#39c979;color:#062617;font-weight:600}
 .plan-card .plan-btn:hover{background:#8ee9b1}
@@ -42,7 +44,8 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
 .plans-footer{margin-top:24px;display:flex;justify-content:space-between;gap:12px;color:rgba(247,251,248,.4);font-size:11px}
 @media(max-width:850px){.plans-grid{grid-template-columns:1fr}.plan-card{min-height:0}.plans-support{align-items:flex-start;flex-direction:column}.plans-support a{width:100%;text-align:center}.plans-top{margin-bottom:40px}}
 @media(max-width:520px){.plans-shell{padding-inline:16px}.plans-hero h1{font-size:44px}.plans-footer{flex-direction:column}}
- .payment-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}.payment-method{padding:24px;border-radius:22px;border:1px solid rgba(142,233,177,.16);background:rgba(255,255,255,.045);display:flex;gap:16px;align-items:flex-start}.payment-method-icon{width:52px;height:52px;flex:0 0 52px;border-radius:15px;display:grid;place-items:center;background:rgba(57,201,121,.12);color:#8ee9b1;font-size:11px;font-weight:700;letter-spacing:.08em}.payment-method h3{margin:0 0 7px;font-size:18px}.payment-method p{margin:0 0 10px;color:rgba(247,251,248,.6);font-size:12px;line-height:1.7}.payment-method a{color:#8ee9b1;font-size:12px}.payment-method-note{display:inline-block;color:#f6d98a;font-size:11px;padding:6px 9px;border-radius:999px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15)}@media(max-width:700px){.payment-methods{grid-template-columns:1fr}}\n</style>
+.payment-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}.payment-method{padding:24px;border-radius:22px;border:1px solid rgba(142,233,177,.16);background:rgba(255,255,255,.045);display:flex;gap:16px;align-items:flex-start}.payment-method-icon{width:52px;height:52px;flex:0 0 52px;border-radius:15px;display:grid;place-items:center;background:rgba(57,201,121,.12);color:#8ee9b1;font-size:11px;font-weight:700;letter-spacing:.08em}.payment-method h3{margin:0 0 7px;font-size:18px}.payment-method p{margin:0 0 10px;color:rgba(247,251,248,.6);font-size:12px;line-height:1.7}.payment-method a{color:#8ee9b1;font-size:12px}.payment-method-note{display:inline-block;color:#f6d98a;font-size:11px;padding:6px 9px;border-radius:999px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15)}@media(max-width:700px){.payment-methods{grid-template-columns:1fr}}
+</style>
 </head>
 <body class="plans-page">
 <main class="plans-shell">
@@ -66,6 +69,7 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
   <section id="plans" class="plans-grid" aria-label="باقات الاشتراك">
     <article class="plan-card">
       <span class="plan-index">01 / MONTHLY</span><h2>الباقة الشهرية</h2><p class="plan-duration">لمدة 30 يوم</p>
+      <p class="plan-old-price">1,500 جنيه <span class="plan-discount">خصم 13%</span></p>
       <p class="plan-price">1,305 <small>جنيه مصري / شهر</small></p>
       <p class="plan-copy">كل الأدوات الأساسية لإدارة منتجاتك ومخزونك وطلباتك من مكان واحد.</p>
       <a class="plan-btn" href="/signup.html?plan=monthly">اختار الباقة الشهرية ←</a>
@@ -73,6 +77,7 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
     </article>
     <article class="plan-card">
       <span class="plan-index">02 / 3 MONTHS</span><h2>باقة 3 شهور</h2><p class="plan-duration">لمدة 90 يوم</p>
+      <p class="plan-old-price">4,015 جنيه <span class="plan-discount">خصم 35%</span></p>
       <p class="plan-price">2,610 <small>جنيه مصري / 3 شهور</small></p>
       <p class="plan-copy">استخدم السيستم لثلاث شهور بسعر إجمالي أقل من الاشتراك الشهري المتكرر.</p>
       <a class="plan-btn" href="/signup.html?plan=quarterly">اختار باقة 3 شهور ←</a>
@@ -80,6 +85,7 @@ body.plans-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-s
     </article>
     <article class="plan-card featured">
       <span class="plan-index">03 / YEARLY</span><h2>الباقة السنوية</h2><p class="plan-duration">لمدة سنة كاملة · 365 يوم</p>
+      <p class="plan-old-price">21,355 جنيه <span class="plan-discount">خصم 45%</span></p>
       <p class="plan-price">11,745 <small>جنيه مصري / سنة</small></p>
       <p class="plan-copy">إدارة مستمرة طول السنة بسعر إجمالي أوفر من التجديدات الشهرية.</p>
       <a class="plan-btn" href="/signup.html?plan=yearly">اختار الباقة السنوية ←</a>
