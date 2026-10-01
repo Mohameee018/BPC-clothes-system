@@ -100,7 +100,7 @@ async function initBrandPresentation(){
  setText(".storytext",settings.storyText||("Discover the collection of "+brandName+"."));
  document.documentElement.style.setProperty("--green",settings.primaryColor||"#39c979");document.documentElement.style.setProperty("--deep",settings.backgroundColor||"#080808");
  const logo=String(settings.logoUrl||"").trim();if(logo)document.querySelectorAll(".brand img,footer img").forEach(img=>{img.src=logo;img.alt=brandName+" logo"});
- const hero=String(settings.heroImageUrl||"").trim();if(hero)["#floating-shirt","#story-shirt"].forEach(sel=>{const img=$(sel);if(img)img.src=hero});
+ const hero=String(settings.heroImageUrl||"").trim();if(hero){["#floating-shirt","#story-shirt"].forEach(sel=>{const img=$(sel);if(img)img.src=hero})};
  const links=[["Instagram",settings.instagramUrl],["TikTok",settings.tiktokUrl],["Facebook",settings.facebookUrl],["Email",settings.contactEmail?("mailto:"+settings.contactEmail):""]];
  document.querySelectorAll(".footerlinks a").forEach(a=>{const match=links.find(([label])=>a.textContent.trim().toLowerCase().includes(label.toLowerCase()));if(match){if(match[1])a.href=match[1];else a.style.display="none"}});
  }catch{}
