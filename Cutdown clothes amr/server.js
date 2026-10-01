@@ -331,7 +331,7 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
   if(ie){if(stockReservation.length){const release=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(release.error)console.error("Failed to release stock after order item error:",release.error.message);}await supabase.from("orders").delete().eq("id",order.id).eq("brand_id",brandId);return r.status(500).json({error:"Could not save order items."});}
   r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."});
  });
-app.get("/payment-result",(_q,r)=>r.sendFile(path.join(__dirname,"payment-result.html")));app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"index.html")));
+app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"index.html")));
 const port=process.env.PORT||3000;
 app.use((err,q,r,next)=>{console.error("Unhandled request error:",err?.stack||err);if(r.headersSent)return next(err);r.status(500).json({error:"Internal server error."})});
 const server=app.listen(port,()=>console.log("Cutdown Store listening on "+port));
