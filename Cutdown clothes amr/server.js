@@ -531,14 +531,15 @@ app.post("/api/admin/subscriptions/renew",async(q,r)=>{
  const id=String(q.body?.subscription_id||"").trim(),planCode=String(q.body?.plan_code||"").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
   if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
  if(!id)return r.status(400).json({error:"subscription_id is required."});
- const sub=await supabase.from("subscriptions").select("id,status,expires_at,plan_id,brand_id").eq("id",id).maybeSingle();
+ const sub=await supabase.from("subscriptions").select("id,status,starts_at,expires_at,last_renewed_at,updated_at,plan_id,brand_id").eq("id",id).maybeSingle();
  if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
  const planQuery=planCode?await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle():await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("id",sub.data.plan_id).maybeSingle();
  if(planQuery.error||!planQuery.data)return r.status(400).json({error:"Invalid renewal plan."});
  const now=new Date(),base=sub.data.expires_at&&new Date(sub.data.expires_at)>now?new Date(sub.data.expires_at):now,expires=addDays(base,Number(planQuery.data.duration_days));
  const up=await supabase.from("subscriptions").update({plan_id:planQuery.data.id,status:"active",starts_at:sub.data.status==="expired"?now.toISOString():sub.data.starts_at,expires_at:expires.toISOString(),updated_at:now.toISOString(),last_renewed_at:now.toISOString()}).eq("id",id).select("id,expires_at,status").single();
  if(up.error)return r.status(500).json({error:"Could not renew subscription."});
- await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(planQuery.data.price||0),payment_method:String(q.body?.payment_method||"manual"),reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  const payment=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number.isFinite(amount)&&amount>=0?amount:Number(planQuery.data.price||0),payment_method:paymentMethod,reference:String(q.body?.payment_reference||"").trim()||null,notes:String(q.body?.notes||"").trim()||null});
+  if(payment.error){const rollback=await supabase.from("subscriptions").update({plan_id:sub.data.plan_id,status:sub.data.status,starts_at:sub.data.starts_at,expires_at:sub.data.expires_at,last_renewed_at:sub.data.last_renewed_at,updated_at:sub.data.updated_at}).eq("id",id);if(rollback.error)console.error("Subscription renewal compensation failed:",rollback.error.message);return r.status(500).json({error:"Could not record the renewal payment. The subscription renewal was rolled back where possible."});}
  r.json({ok:true,subscription:up.data,plan:planQuery.data});
 });
 app.get("/api/desktop/update",async(q,r)=>{
