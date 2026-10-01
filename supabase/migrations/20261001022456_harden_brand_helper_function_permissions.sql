@@ -1,0 +1,10 @@
+begin;
+create or replace function public.current_brand_id() returns uuid language sql stable security invoker set search_path = public as $function$ select brand_id from public.profiles where id = (select auth.uid()) limit 1 $function$;
+create or replace function public.is_brand_admin() returns boolean language sql stable security invoker set search_path = public as $function$ select exists(select 1 from public.profiles where id = (select auth.uid()) and role = 'admin' and brand_id is not null) $function$;
+revoke execute on function public.current_brand_id() from public, anon;
+revoke execute on function public.is_brand_admin() from public, anon;
+grant execute on function public.current_brand_id() to authenticated;
+grant execute on function public.is_brand_admin() to authenticated;
+revoke execute on function public.claim_customer_for_auth() from public, anon, authenticated;
+grant execute on function public.claim_customer_for_auth() to service_role;
+commit;
