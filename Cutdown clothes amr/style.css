@@ -49,3 +49,6 @@
 .product .product-cta,.product .product-cta:hover,.product .product-cta:active{background:rgba(255,255,255,.06);color:#fff;border-color:rgba(255,255,255,.22);}
 
 .review-msg{min-height:0;margin:0 0 16px;padding:0;opacity:0;transform:translateY(-6px);font-family:Arial,sans-serif;font-size:14px;transition:.3s;border-radius:14px}.review-msg.show{opacity:1;transform:none;padding:13px 16px;background:rgba(31,190,120,.12);border:1px solid rgba(31,190,120,.28);color:#167a50}.review-msg.error{background:rgba(226,29,46,.1);border-color:rgba(226,29,46,.25);color:#b31222}.review-form .btn:disabled{opacity:.55;cursor:wait;transform:none}.product{touch-action:manipulation}
+
+/* BPC platform attribution footer */
+footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:28px;padding:64px 6vw;border-top:1px solid rgba(255,255,255,.12)}.bpc-powered{flex-basis:100%;width:100%;margin-top:24px;padding-top:18px;border-top:1px solid rgba(255,255,255,.1);display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;font:12px Arial,sans-serif;letter-spacing:.02em;color:#aaa}.bpc-powered strong{color:#eee;font-weight:600}.bpc-powered a{color:inherit;text-decoration:underline;text-underline-offset:4px}.bpc-powered a:hover{color:#39c979}@media(max-width:600px){footer{padding:42px 22px;gap:22px}.bpc-powered{font-size:11px}}
