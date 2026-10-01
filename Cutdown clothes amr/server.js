@@ -23,6 +23,8 @@ const supabase=process.env.SUPABASE_URL&&SUPABASE_SERVER_KEY?createClient(proces
 const rateBuckets=new Map();
 function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
+// Protect all super-admin API endpoints from brute-force/request flooding without affecting other app routes.
+app.use("/api/admin",rateLimit({windowMs:60*1000,max:120,keyPrefix:"admin-api"}));
 const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
 const configuredBrandId=()=>String((process.env.BPC_BRAND_ID||process.env.CUTDOWN_BRAND_ID)||DEFAULT_BRAND_ID).trim();
 async function resolvePublicBrand(req){
