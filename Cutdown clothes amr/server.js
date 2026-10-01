@@ -893,6 +893,9 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
  let publicBrand;try{publicBrand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}
  if(!publicBrand)return r.status(404).json({error:"Store brand not found or inactive."});
  const brandId=String(publicBrand.id);
+  const requestId=String(q.body?.request_id||"").trim();
+  if(requestId&&(!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)))return r.status(400).json({error:"Invalid checkout request ID."});
+  if(requestId){const prior=await supabase.from("orders").select("id,payment_status,order_status").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.error)return r.status(500).json({error:"Could not check the previous order request."});if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}
   if(!customer?.name||!customer?.phone||!customer?.address||!Array.isArray(items)||!items.length)return r.status(400).json({error:"Missing order details."});
   if(items.length>50)return r.status(400).json({error:"Too many order items."});
   if(items.some(i=>!i||!i.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order item."});
@@ -926,8 +929,12 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
    catch(e){return r.status(500).json({error:"Could not link customer record."});}
  }
  if(stockReservation.length){const reserve=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});if(reserve.error)return r.status(409).json({error:"One or more selected sizes are no longer available."})}
- const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0}).select().single();
- if(oe&&stockReservation.length){await supabase.rpc("release_stock_items",{p_items:stockReservation});}if(oe)return r.status(500).json({error:"Could not create order."});
+ const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0,client_request_id:requestId||null}).select().single();
+ if(oe&&stockReservation.length){const released=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(released.error)console.error("Failed to release stock after order insert failure:",released.error.message);}
+ if(oe){
+   if(requestId&&oe.code==="23505"){const prior=await supabase.from("orders").select("id").eq("brand_id",brandId).eq("client_request_id",requestId).maybeSingle();if(prior.data)return r.status(200).json({order_id:prior.data.id,payment_required:false,duplicate:true,message:"This order request was already processed."});}
+   return r.status(500).json({error:"Could not create order."});
+ }
  const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id,brand_id:brandId})));
   if(ie){
     if(stockReservation.length)await supabase.rpc("release_stock_items",{p_items:stockReservation});
