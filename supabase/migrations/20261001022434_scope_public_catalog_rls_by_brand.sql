@@ -1,0 +1,10 @@
+begin;
+drop policy if exists "public read active products" on public.products;
+drop policy if exists "public read active product variants" on public.product_variants;
+drop policy if exists "public read product images" on public.product_images;
+drop policy if exists "public read approved reviews" on public.reviews;
+create policy "authenticated read products in own brand" on public.products for select to authenticated using (brand_id = (select public.current_brand_id()));
+create policy "authenticated read variants in own brand" on public.product_variants for select to authenticated using (brand_id = (select public.current_brand_id()));
+create policy "authenticated read images in own brand" on public.product_images for select to authenticated using (brand_id = (select public.current_brand_id()));
+create policy "authenticated read reviews in own brand" on public.reviews for select to authenticated using (brand_id = (select public.current_brand_id()));
+commit;
