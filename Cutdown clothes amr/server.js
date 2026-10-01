@@ -45,7 +45,6 @@ async function resolvePublicBrand(req){
  if(fallback.error)throw fallback.error;
  return fallback.data||null;
 }
-const paymobBase=process.env.PAYMOB_BASE_URL||"https://accept.paymob.com";
 
 async function requireDesktopSync(q,r,next){
   if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
@@ -185,10 +184,13 @@ function makeActivationCode(){
 function addDays(date,days){return new Date(date.getTime()+Number(days)*86400000)}
 async function getSubscriptionForUser(userId){
   if(!supabase||!userId)return null;
+  const profile=await getAuthProfile(userId);
+  if(!profile?.brand_id)return null;
   const now=new Date();
   const q=await supabase.from("subscriptions")
     .select("id,brand_id,auth_user_id,status,starts_at,expires_at,customer_name,customer_email,payment_method,plan_id,subscription_plans(code,name,duration_days,price)")
     .eq("auth_user_id",userId)
+    .eq("brand_id",profile.brand_id)
     .order("expires_at",{ascending:false})
     .limit(1)
     .maybeSingle();
@@ -230,41 +232,6 @@ app.get("/api/subscription/plans",async(_q,r)=>{
  if(p.error)return r.status(500).json({error:"Could not load subscription plans."});
  r.json({plans:p.data||[]});
 });
-async function createPaymobIntention({amountCents,email,name,phone,planName,paymentRef}){
- const secret=String(process.env.PAYMOB_SECRET_KEY||"").trim();
- const publicKey=String(process.env.PAYMOB_PUBLIC_KEY||"").trim();
- const methods=String(process.env.PAYMOB_PAYMENT_METHODS||"").split(",").map(x=>x.trim()).filter(Boolean).map(x=>/^\\d+$/.test(x)?Number(x):x);
- if(!secret||!publicKey||!methods.length)throw new Error("PAYMOB_NOT_CONFIGURED");
- const baseUrl=String(process.env.PUBLIC_BASE_URL||"").replace(/\/$/,"");
- if(!baseUrl)throw new Error("PUBLIC_BASE_URL_NOT_CONFIGURED");
- const response=await fetch(paymobBase+"/v1/intention/",{
-  method:"POST",
-  headers:{"Authorization":"Token "+secret,"Content-Type":"application/json"},
-  body:JSON.stringify({
-   amount:Number(amountCents),currency:"EGP",payment_methods:methods,
-   items:[{name:planName,amount:Number(amountCents),description:"BPC Clothes System subscription",quantity:1}],
-   billing_data:{first_name:String(name||"Customer").split(/\\s+/)[0]||"Customer",last_name:String(name||"Customer").split(/\\s+/).slice(1).join(" ")||"Customer",phone_number:String(phone||"0000000000"),email,apartment:"NA",floor:"NA",street:"NA",building:"NA",city:"Cairo",state:"Cairo",country:"EG"},
-   special_reference:paymentRef,expiration:3600,
-   notification_url:baseUrl+"/api/payments/paymob/webhook",
-   redirection_url:baseUrl+"/payment-result.html"
-  })
- });
- const data=await response.json().catch(()=>({}));
- if(!response.ok||!data?.client_secret)throw new Error("PAYMOB_INTENTION_FAILED");
- return {clientSecret:String(data.client_secret),intentionId:String(data.id||""),orderId:String(data.intention_order_id||"")};
-}
-function paymobCheckoutUrl(clientSecret){
- const publicKey=String(process.env.PAYMOB_PUBLIC_KEY||"").trim();
- return paymobBase+"/unifiedcheckout/?publicKey="+encodeURIComponent(publicKey)+"&clientSecret="+encodeURIComponent(clientSecret);
-}
-function paymobTxnHmacValid(obj,received){
- const secret=String(process.env.PAYMOB_HMAC_SECRET||"").trim();
- if(!secret||!received||!obj)return false;
- const source=obj.source_data||{},order=obj.order||{};
- const values=[obj.amount_cents,obj.created_at,obj.currency,obj.error_occured,obj.has_parent_transaction,obj.id,obj.integration_id,obj.is_3d_secure,obj.is_auth,obj.is_capture,obj.is_refunded,obj.is_standalone_payment,obj.is_voided,order.id,obj.owner,obj.pending,source.pan,source.sub_type,source.type,obj.success].map(v=>v===true?"true":v===false?"false":String(v??""));
- const expected=crypto.createHmac("sha512",secret).update(values.join("")).digest("hex");
- const actual=Buffer.from(String(received));const expectedBuf=Buffer.from(expected);return actual.length===expectedBuf.length&&crypto.timingSafeEqual(expectedBuf,actual);
-}
 app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"subscription-signup"}),async(q,r)=>{
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim().toLowerCase(),password=String(q.body?.password||""),name=String(q.body?.name||"").trim(),phone=String(q.body?.phone||"").trim(),planCode=String(q.body?.plan||"").trim().toLowerCase();
@@ -315,10 +282,16 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
   await supabase.auth.admin.deleteUser(user.id);
   return r.status(500).json({error:"Could not create the pending subscription."});
 }
-  const requestedMethod=String(q.body?.payment_method||"paymob").trim().toLowerCase();
- if(requestedMethod==="instapay"||requestedMethod==="vodafone_cash"){
+  const requestedMethod=String(q.body?.payment_method||"instapay").trim().toLowerCase();
+  if(!["instapay","vodafone_cash"].includes(requestedMethod)){
+   await supabase.from("subscriptions").delete().eq("id",pending.data.id);
+   await supabase.from("brands").delete().eq("id",brandId);
+   await supabase.auth.admin.deleteUser(user.id);
+   return r.status(400).json({error:"Choose InstaPay or Vodafone Cash. Online card payment is not available."});
+  }
   const manual=await getPlatformPaymentSettings();
-  await supabase.from("subscriptions").update({payment_method:requestedMethod,activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
+  const methodUpdate=await supabase.from("subscriptions").update({payment_method:requestedMethod,activation_code_hash:null,activation_expires_at:null,updated_at:new Date().toISOString()}).eq("id",pending.data.id);
+  if(methodUpdate.error)return r.status(500).json({error:"Could not save the selected payment method."});
   return r.status(201).json({
    user:{id:user.id,email:user.email||email},session:paymentSession.data.session,requires_email_confirmation:false,
    subscription:{id:pending.data.id,plan:plan.data,status:"pending"},
@@ -326,39 +299,8 @@ app.post("/api/subscription/signup",rateLimit({windowMs:10*60*1000,max:5,keyPref
     address:manual.instapayAddress,name:manual.instapayName,bank:manual.instapayBank,account:manual.instapayAccount,amount:price,currency:"EGP"
    }:{number:manual.vodafoneCashNumber,name:manual.vodafoneCashName,amount:price,currency:"EGP"}}
   });
- }
- let payment;
- try{payment=await createPaymobIntention({amountCents:Math.round(price*100),email,name,phone,planName:plan.data.name,paymentRef});}
- catch(error){
-  await supabase.from("subscriptions").delete().eq("id",pending.data.id);
-  await supabase.auth.admin.deleteUser(user.id);
-  const msg=String(error?.message||"");
-  if(msg==="PAYMOB_NOT_CONFIGURED"||msg==="PUBLIC_BASE_URL_NOT_CONFIGURED")return r.status(503).json({error:"Online payment is not configured yet. Please contact support for manual payment."});
-  return r.status(502).json({error:"Could not start the secure payment checkout. Please try again."});
- }
- r.status(201).json({user:{id:user.id,email:user.email||email},session:signed.data.session||null,requires_email_confirmation:!signed.data.session,subscription:{id:pending.data.id,plan:plan.data},payment:{checkout_url:paymobCheckoutUrl(payment.clientSecret),reference:paymentRef}});
-});
-app.post("/api/payments/paymob/webhook",async(q,r)=>{
- const received=String(q.query?.hmac||"").trim(),obj=q.body?.obj;
- if(!paymobTxnHmacValid(obj,received))return r.status(200).json({ok:false});
- const order=obj?.order||{},reference=String(order?.merchant_order_id||"").trim();
- if(!reference)return r.status(200).json({ok:true});
- const sub=await supabase.from("subscriptions").select("id,auth_user_id,plan_id,status,activation_code_hash,subscription_plans(code,duration_days,price)").eq("activation_code_hash",hashActivationCode(reference)).eq("status","pending").maybeSingle();
- if(sub.error||!sub.data)return r.status(200).json({ok:true});
- const expectedCents=Math.round(Number(sub.data.subscription_plans?.price||0)*100);
- const paidCents=Number(obj.amount_cents||0);
- if(!obj.success||obj.error_occured||obj.is_refunded||paidCents!==expectedCents){
-  await supabase.from("subscriptions").update({status:"failed",updated_at:new Date().toISOString()}).eq("id",sub.data.id).eq("status","pending");
-  return r.status(200).json({ok:true});
- }
- const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
- await supabase.from("subscriptions").update({
-  status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),
-  activation_code_hash:null,activation_expires_at:null,payment_method:"paymob",updated_at:now.toISOString()
- }).eq("id",sub.data.id).eq("status","pending");
- r.status(200).json({ok:true});
-});
-app.post("/api/subscription/instapay-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"instapay-reference"}),async(q,r)=>{
+ });
+ app.post("/api/subscription/instapay-reference",rateLimit({windowMs:10*60*1000,max:5,keyPrefix:"instapay-reference"}),async(q,r)=>{
  const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});
  const reference=String(q.body?.reference||"").trim(),notes=String(q.body?.notes||"").trim();
  if(reference.length<3||reference.length>120)return r.status(400).json({error:"Enter a valid InstaPay transaction reference."});
@@ -956,7 +898,7 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
   if(items.some(i=>!i||!i.product_id||!Number.isSafeInteger(Number(i.quantity))||Number(i.quantity)<1||Number(i.quantity)>100))return r.status(400).json({error:"Invalid order item."});
   const fields=[["name",customer.name,120],["phone",customer.phone,40],["address",customer.address,500],["city",customer.city,100],["email",customer.email,254],["notes",customer.notes,1000]];
   if(fields.some(([_,v,max])=>v!==undefined&&String(v).length>max))return r.status(400).json({error:"One or more order fields are too long."});
-  if(!["cod","online"].includes(payment_method))return r.status(400).json({error:"Invalid payment method."});
+  if(payment_method!=="cod")return r.status(400).json({error:"Online card payment is disabled. Choose cash on delivery."});
  const {data:products,error:pe}=await supabase.from("products").select("id,name,price,cost_price,stock,active").eq("brand_id",brandId).in("id",items.map(i=>i.product_id));if(pe)return r.status(500).json({error:"Could not load products."});
  const variantIds=items.map(i=>i.variant_id).filter(Boolean);let variants=[];if(variantIds.length){const vr=await supabase.from("product_variants").select("id,product_id,size,color,stock,active").eq("brand_id",brandId).in("id",variantIds);if(vr.error)return r.status(500).json({error:"Internal server error."});variants=vr.data||[]}
  const map=new Map((products||[]).map(p=>[p.id,p])),vmap=new Map(variants.map(v=>[v.id,v]));let total=0;const clean=[];
@@ -986,19 +928,18 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
  if(stockReservation.length){const reserve=await supabase.rpc("reserve_stock_items",{p_items:stockReservation});if(reserve.error)return r.status(409).json({error:"One or more selected sizes are no longer available."})}
  const {data:order,error:oe}=await supabase.from("orders").insert({customer_name:customer.name.trim(),customer_phone:customer.phone.trim(),customer_email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address.trim(),notes:customer.notes?.trim()||null,payment_method,payment_status:"pending",order_status:"pending",total_amount:total,customer_id:customerId,brand_id:brandId,source:"website",stock_reserved:stockReservation.length>0}).select().single();
  if(oe&&stockReservation.length){await supabase.rpc("release_stock_items",{p_items:stockReservation});}if(oe)return r.status(500).json({error:"Could not create order."});
- const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id,brand_id:brandId})));if(ie){if(stockReservation.length)await supabase.rpc("release_stock_items",{p_items:stockReservation});await supabase.from("orders").delete().eq("id",order.id);return r.status(500).json({error:"Could not save order items."})}
- if(payment_method==="cod"){await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id);return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."})}
- if(!(process.env.PAYMOB_SECRET_KEY&&process.env.PAYMOB_PUBLIC_KEY&&process.env.PAYMOB_INTEGRATION_ID&&process.env.PAYMOB_HMAC_SECRET&&base)){if(stockReservation.length){const release=await supabase.rpc("release_stock_items",{p_items:stockReservation});if(release.error)console.error("Failed to release reserved stock:",release.error.message);}await supabase.from("orders").update({stock_reserved:false,payment_status:"failed",order_status:"pending"}).eq("id",order.id);return r.status(503).json({error:"Online payment is not configured yet. Add Supabase + Paymob variables in Railway."});}
- const amountCents=Math.round(total*100),parts=customer.name.trim().split(/\s+/),first=parts[0]||"Customer",last=parts.slice(1).join(" ")||"Customer";
- const pay=await fetch(paymobBase+"/v1/intention/",{method:"POST",headers:{"Authorization":"Token "+process.env.PAYMOB_SECRET_KEY,"Content-Type":"application/json"},body:JSON.stringify({amount:amountCents,currency:"EGP",payment_methods:[Number(process.env.PAYMOB_INTEGRATION_ID)],items:clean.map(i=>({name:i.product_name,amount:Math.round(Number(i.unit_price)*100),description:"BPC Clothes System product",quantity:i.quantity})),billing_data:{first_name:first,last_name:last,email:customer.email||"no-email@cutdown.store",phone_number:customer.phone,apartment:"NA",building:"NA",street:customer.address,floor:"NA",city:customer.city||"Cairo",state:customer.city||"Cairo",country:"EGY"},special_reference:order.id,expiration:3600,notification_url:base+"/api/paymob/webhook",redirection_url:base+"/payment-result?order_id="+encodeURIComponent(order.id)})});
- const pd=await pay.json();if(!pay.ok){if(stockReservation.length)await supabase.rpc("release_stock_items",{p_items:stockReservation});await supabase.from("orders").update({stock_reserved:false,payment_status:"failed",order_status:"pending"}).eq("id",order.id);return r.status(502).json({error:"Payment provider rejected the request."});}const checkoutUrl=paymobBase+"/unifiedcheckout/?publicKey="+encodeURIComponent(process.env.PAYMOB_PUBLIC_KEY)+"&clientSecret="+encodeURIComponent(pd.client_secret);r.status(201).json({order_id:order.id,payment_required:true,checkout_url:checkoutUrl});
-});
-function verifyHmac(o,h){if(!o||!h||!process.env.PAYMOB_HMAC_SECRET)return false;const f=[o.amount_cents,o.created_at,o.currency,o.error_occured,o.has_parent_transaction,o.id,o.integration_id,o.is_3d_secure,o.is_auth,o.is_capture,o.is_refunded,o.is_standalone_payment,o.is_voided,o.order?.id,o.owner,o.pending,o.source_data?.pan,o.source_data?.sub_type,o.source_data?.type,o.success],c=crypto.createHmac("sha512",process.env.PAYMOB_HMAC_SECRET).update(f.map(String).join("")).digest("hex");return c.length===h.length&&crypto.timingSafeEqual(Buffer.from(c),Buffer.from(h))}
-app.post("/api/paymob/webhook",async(q,r)=>{const o=q.body?.obj,h=String(q.query.hmac||"");if(!verifyHmac(o,h))return r.status(401).json({error:"Invalid HMAC"});if(!supabase)return r.sendStatus(503);const orderId=o.order?.merchant_order_id||o.merchant_order_id;if(!orderId)return r.json({received:true});const ord=await supabase.from("orders").select("id,total_amount,payment_status,order_status,stock_reserved").eq("id",orderId).eq("source","website").maybeSingle();if(ord.error)return r.sendStatus(503);if(!ord.data)return r.status(404).json({error:"Order not found"});if(o.integration_id!=null&&Number(o.integration_id)!==Number(process.env.PAYMOB_INTEGRATION_ID))return r.status(400).json({error:"Invalid payment integration"});if(String(o.currency||"").toUpperCase()!=="EGP")return r.status(400).json({error:"Invalid payment currency"});const expected=Math.round(Number(ord.data.total_amount)*100);if(Number(o.amount_cents)!==expected)return r.status(400).json({error:"Invalid payment amount"});const event={provider_event_id:String(o.id),order_id:orderId,success:o.success===true,payload:o};const inserted=await supabase.from("payment_events").upsert(event,{onConflict:"provider_event_id",ignoreDuplicates:true}).select("id").maybeSingle();if(inserted.error)return r.sendStatus(503);if(!inserted.data)return r.json({received:true,duplicate:true});const success=o.success===true&&!o.pending;const patch={payment_status:success?"paid":"failed",order_status:success?"confirmed":"pending"};if(success){if(ord.data.payment_status!=="paid")await supabase.from("orders").update(patch).eq("id",orderId).eq("payment_status","pending");}else{if(ord.data.payment_status!=="paid"){await supabase.from("orders").update(patch).eq("id",orderId);if(ord.data.stock_reserved){const it=await supabase.from("order_items").select("product_id,variant_id,quantity").eq("order_id",orderId);const items=(it.data||[]).map(x=>({product_id:x.product_id,variant_id:x.variant_id,quantity:x.quantity}));if(items.length){const release=await supabase.rpc("release_stock_items",{p_items:items});if(release.error)console.error("Failed to release reserved stock after payment failure:",release.error.message)}await supabase.from("orders").update({stock_reserved:false}).eq("id",orderId);}}}r.json({received:true})});
-app.get("/api/payment-status",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});const id=String(q.query.order_id||"").trim();if(!id)return r.status(400).json({error:"Missing order_id."});const o=await supabase.from("orders").select("id,payment_status,order_status,total_amount,created_at").eq("id",id).eq("source","website").maybeSingle();if(o.error)return r.status(500).json({error:"Internal server error."});if(!o.data)return r.status(404).json({error:"Order not found."});r.json({order_id:o.data.id,payment_status:o.data.payment_status,order_status:o.data.order_status,total_amount:o.data.total_amount,created_at:o.data.created_at})});
-app.get("/robots.txt",(_q,r)=>{r.type("text/plain").send("User-agent: *\nAllow: /store\nDisallow: /\nDisallow: /app\nDisallow: /admin\nDisallow: /account\nDisallow: /api/\nSitemap: "+base.replace(/\/$/,"")+"/sitemap.xml\n")});
+ const {error:ie}=await supabase.from("order_items").insert(clean.map(i=>({...i,order_id:order.id,brand_id:brandId})));
+  if(ie){
+    if(stockReservation.length)await supabase.rpc("release_stock_items",{p_items:stockReservation});
+    await supabase.from("orders").delete().eq("id",order.id);
+    return r.status(500).json({error:"Could not save order items."});
+  }
+  await supabase.from("orders").update({order_status:"confirmed"}).eq("id",order.id).eq("brand_id",brandId);
+  return r.status(201).json({order_id:order.id,payment_required:false,message:"Order confirmed for cash on delivery."});
+ });
+ app.get("/robots.txt",(_q,r)=>{r.type("text/plain").send("User-agent: *\nAllow: /store\nDisallow: /\nDisallow: /app\nDisallow: /admin\nDisallow: /account\nDisallow: /api/\nSitemap: "+base.replace(/\/$/,"")+"/sitemap.xml\n")});
 app.get("/sitemap.xml",(_q,r)=>{const root=(base||"").replace(/\/$/,"");r.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${root}/store</loc></url></urlset>`) });
-app.get("/payment-result",(_q,r)=>r.sendFile(path.join(__dirname,"payment-result.html")));app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.get("/app",(_q,r)=>r.sendFile(path.join(__dirname,"app.html")));app.get("/store",(_q,r)=>r.sendFile(path.join(__dirname,"store.html")));app.get("/",(_q,r)=>r.sendFile(path.join(__dirname,"index.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"app.html")));
+app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.get("/app",(_q,r)=>r.sendFile(path.join(__dirname,"app.html")));app.get("/store",(_q,r)=>r.sendFile(path.join(__dirname,"store.html")));app.get("/",(_q,r)=>r.sendFile(path.join(__dirname,"index.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"app.html")));
 const port=process.env.PORT||3000;
 app.use((err,q,r,next)=>{if(r.headersSent)return next(err);if(err?.type==="entity.parse.failed"||err?.type==="request.aborted"){if(err.type==="entity.parse.failed")return r.status(400).json({error:"Invalid JSON request body."});return r.status(400).json({error:"Request body was interrupted. Please retry."});}console.error("Unhandled request error:",err?.stack||err);r.status(500).json({error:"Internal server error."})});
 const server=app.listen(port,()=>console.log("BPC Clothes System listening on "+port));
