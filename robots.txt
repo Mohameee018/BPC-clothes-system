@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /login
+Disallow: /auth
+Disallow: /api
+Disallow: /signup.html
+
+Sitemap: https://bpc-clothes-system-production.up.railway.app/sitemap.xml
