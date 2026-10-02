@@ -80,16 +80,27 @@ document.querySelectorAll('input[name="payment_method"]').forEach(r=>r.addEventL
 $("#reviewForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,button=form.querySelector("button[type=submit]");button.disabled=true;showReviewMessage("");try{const r=await fetch(apiUrl("/api/reviews"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(new FormData(form)))}),d=await r.json().catch(()=>({}));if(!r.ok){showReviewMessage(d.error||"Could not post review.",true);return}form.reset();showReviewMessage("Thank you for your review ❤️ It was posted successfully.");await loadReviews();form.scrollIntoView({behavior:"smooth",block:"center"})}catch{showReviewMessage("Could not connect. Please try again.",true)}finally{button.disabled=false}};
 $("#checkoutForm").onsubmit=async e=>{
  e.preventDefault();
- const f=new FormData(e.currentTarget),customer=Object.fromEntries(f),payment_method=customer.payment_method;delete customer.payment_method;
+ const form=e.currentTarget,button=form.querySelector('button[type="submit"]');
+ if(button.disabled||!state.cart.length)return;
+ button.disabled=true;button.textContent="Placing order…";
+ const f=new FormData(form),customer=Object.fromEntries(f),payment_method=customer.payment_method;delete customer.payment_method;
  const authHeaders=authState.session?{Authorization:"Bearer "+authState.session.access_token}:{};
  const requestStorageKey="bpc_checkout_request_"+(storeBrandSlug||"default");
  const fingerprint=JSON.stringify({brand:storeBrandSlug,customer,items:state.cart,payment_method});
  let saved=null;try{saved=JSON.parse(sessionStorage.getItem(requestStorageKey)||"null")}catch{}
  if(!saved||saved.fingerprint!==fingerprint){saved={fingerprint,requestId:crypto.randomUUID()};sessionStorage.setItem(requestStorageKey,JSON.stringify(saved))}
- const r=await fetch(apiUrl("/api/orders"),{method:"POST",headers:{"Content-Type":"application/json",...authHeaders},body:JSON.stringify({customer,items:state.cart,payment_method,request_id:saved.requestId})});
- const d=await r.json().catch(()=>({})),msg=$("#checkoutMsg");
- if(!r.ok){msg.textContent=d.error||"Checkout failed.";return}
- sessionStorage.removeItem(requestStorageKey);state.cart=[];save();e.currentTarget.reset();msg.textContent=d.message||"Order confirmed.";
+ const msg=$("#checkoutMsg");
+ try{
+  const r=await fetch(apiUrl("/api/orders"),{method:"POST",headers:{"Content-Type":"application/json",...authHeaders},body:JSON.stringify({customer,items:state.cart,payment_method,request_id:saved.requestId})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){msg.textContent=d.error||"Checkout failed.";return}
+  sessionStorage.removeItem(requestStorageKey);state.cart=[];save();form.reset();msg.textContent=d.message||"Order confirmed.";
+  $("#checkout").classList.remove("open");
+  const notice=document.createElement("div");notice.style.cssText="position:fixed;z-index:100000;left:50%;top:24px;transform:translateX(-50%);width:min(460px,calc(100% - 32px));padding:16px 20px;border-radius:14px;background:#173f32;color:#fff;box-shadow:0 18px 50px #0005;font:600 14px Arial,sans-serif;text-align:center";
+  notice.textContent=(d.message||"Order confirmed.")+" Your order has been received.";
+  document.body.appendChild(notice);setTimeout(()=>notice.remove(),5000);
+ }catch{msg.textContent="Could not connect. Please try again."}
+ finally{button.disabled=false;button.textContent="Place order →"}
 };
 let storyProgress=0,pointer={x:0,y:0},scrollYValue=0,target={x:0,y:0,rot:0,scale:1,opacity:1,z:-420},current={x:0,y:0,rot:0,scale:1,opacity:1};
 function updateHeroTarget(){const m=$("#floating-shirt"),hero=document.querySelector(".hero");if(!m||!hero)return;const p=Math.min(1,Math.max(0,scrollYValue/(hero.offsetHeight*.9))),fall=Math.min(1,p/.72),rebound=p>.72?Math.sin((p-.72)/.28*Math.PI)*-75:0;target.y=fall*Math.min(360,innerHeight*.42)+rebound;target.x=-pointer.x*28;target.rot=-pointer.x*4+fall*5;target.scale=1.08-fall*.12;target.opacity=1-Math.max(0,p-.9)*7;target.z=-420-fall*520}
