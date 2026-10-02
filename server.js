@@ -128,7 +128,18 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
  if(!order_id)return r.status(400).json({error:"Missing order_id."});
  const owned=await supabase.from("orders").select("id").eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").maybeSingle();
  if(owned.error)return r.status(500).json({error:"Internal server error."}); if(!owned.data)return r.status(404).json({error:"Website order not found."});
- const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:String(disposition||"Return to Stock"),p_refund_amount:Number(amount||0),p_loss:Number(loss||0)});
+ const normalizedDisposition=String(disposition||"Return to Stock");
+ let serverLoss=0;
+ if(normalizedDisposition==="Scrap / Damaged"){
+   const items=await supabase.from("order_items").select("product_id,quantity,cost_price").eq("order_id",order_id);
+   if(items.error)return r.status(500).json({error:"Could not calculate the damaged-order loss."});
+   const productIds=[...new Set((items.data||[]).map(x=>x.product_id).filter(Boolean))];
+   const products=productIds.length?await supabase.from("products").select("id,cost_price").eq("brand_id",q.brandId).in("id",productIds):{data:[],error:null};
+   if(products.error)return r.status(500).json({error:"Could not calculate the damaged-order loss."});
+   const productCosts=new Map((products.data||[]).map(x=>[String(x.id),Number(x.cost_price||0)]));
+   serverLoss=(items.data||[]).reduce((n,i)=>n+Number(i.quantity||0)*Number(i.cost_price||0||productCosts.get(String(i.product_id))||0),0);
+ }
+ const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:normalizedDisposition,p_refund_amount:Number(amount||0),p_loss:serverLoss});
  if(result.error){
    const msg=String(result.error.message||"");
    if(msg.includes("WEBSITE_ORDER_NOT_FOUND"))return r.status(404).json({error:"Website order not found."});
