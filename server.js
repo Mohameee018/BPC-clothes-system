@@ -800,7 +800,7 @@ app.get("/api/system/:table",async(q,r)=>{
     for(const order of ordersResult.data||[]){
       const id=String(order.customer_id||"");if(!id)continue;
       const entry=byCustomer.get(id)||{total_orders:0,total_spent:0};
-      if(!/cancel/i.test(String(order.order_status||""))){entry.total_orders+=1;if(!returned.has(String(order.id)))entry.total_spent+=Number(order.total_amount||0);}
+      entry.total_orders+=1;if(!returned.has(String(order.id))&&!/cancel/i.test(String(order.order_status||"")))entry.total_spent+=Number(order.total_amount||0);
       byCustomer.set(id,entry);
     }
     return r.json(customers.map(customer=>({...customer,...(byCustomer.get(String(customer.id))||{total_orders:0,total_spent:0})})));
