@@ -137,7 +137,7 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
    const products=productIds.length?await supabase.from("products").select("id,cost_price").eq("brand_id",q.brandId).in("id",productIds):{data:[],error:null};
    if(products.error)return r.status(500).json({error:"Could not calculate the damaged-order loss."});
    const productCosts=new Map((products.data||[]).map(x=>[String(x.id),Number(x.cost_price||0)]));
-   serverLoss=(items.data||[]).reduce((n,i)=>n+Number(i.quantity||0)*Number(i.cost_price||0||productCosts.get(String(i.product_id))||0),0);
+   serverLoss=(items.data||[]).reduce((n,i)=>{const itemCost=Number(i.cost_price||0);const fallback=Number(productCosts.get(String(i.product_id))||0);return n+Number(i.quantity||0)*(itemCost>0?itemCost:fallback)},0);
  }
  const result=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:String(reason||"Customer Return"),p_disposition:normalizedDisposition,p_refund_amount:Number(amount||0),p_loss:serverLoss});
  if(result.error){
