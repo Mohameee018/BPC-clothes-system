@@ -25,8 +25,6 @@ function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
 // Protect all super-admin API endpoints from brute-force/request flooding without affecting other app routes.
 app.use("/api/admin",rateLimit({windowMs:60*1000,max:120,keyPrefix:"admin-api"}));
-const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
-const configuredBrandId=()=>String((process.env.BPC_BRAND_ID||process.env.CUTDOWN_BRAND_ID)||DEFAULT_BRAND_ID).trim();
 async function resolvePublicBrand(req){
  if(!supabase)return null;
  const requested=String(req.query?.brand||req.body?.brand_slug||"").trim().toLowerCase();
@@ -36,16 +34,13 @@ async function resolvePublicBrand(req){
   return found.data||null;
  }
  const host=String(req.headers?.host||"").split(":")[0].toLowerCase();
- const baseHost=(()=>{try{return new URL(process.env.PUBLIC_BASE_URL||"").hostname.toLowerCase()}catch{return ""}})();
- if(host&&(!baseHost||host!==baseHost)){
+ if(host){
   const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);
   if(brands.error)throw brands.error;
   const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});
   if(match)return match;
  }
- const fallback=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",configuredBrandId()).eq("active",true).maybeSingle();
- if(fallback.error)throw fallback.error;
- return fallback.data||null;
+ return null;
 }
 
 async function requireDesktopSync(q,r,next){
@@ -57,7 +52,8 @@ async function requireDesktopSync(q,r,next){
   const profile=await getAuthProfile(user.id);
   if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
   const brandId=String(profile.brand_id);
-  if(brandId!==configuredBrandId())return r.status(403).json({error:"This desktop installation is not assigned to this brand."});
+  const brand=await supabase.from("brands").select("id,active").eq("id",brandId).maybeSingle();
+  if(brand.error||!brand.data?.active)return r.status(403).json({error:"This brand is inactive or unavailable."});
   q.brandId=brandId;
   q.desktopUser=user;
   next();
@@ -864,7 +860,7 @@ app.get("/api/products",async(q,r)=>{
 });
 app.get("/api/reviews",async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});let brand;try{brand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const {data,error}=await supabase.from("reviews").select("*").eq("brand_id",brand.id).eq("approved",true).order("created_at",{ascending:false});if(error)return r.status(500).json({error:"Could not load reviews."});r.set("Cache-Control","public, max-age=30, stale-while-revalidate=60");r.json(data||[])});
 app.post("/api/reviews",rateLimit({windowMs:10*60*1000,max:10,keyPrefix:"reviews"}),async(q,r)=>{if(!supabase)return r.status(503).json({error:"Supabase is not configured."});let brand;try{brand=await resolvePublicBrand(q)}catch{return r.status(503).json({error:"Could not resolve store brand."})}if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});const {name,rating,body}=q.body||{};if(!name?.trim()||!body?.trim()||!Number.isInteger(Number(rating))||Number(rating)<1||Number(rating)>5)return r.status(400).json({error:"Invalid review."});const {data,error}=await supabase.from("reviews").insert({brand_id:brand.id,name:name.trim().slice(0,80),rating:Number(rating),body:body.trim().slice(0,1000),approved:true}).select().single();if(error)return r.status(500).json({error:"Could not save review."});r.status(201).json(data)});
-async function findOrCreateCustomer(customer,brandId=configuredBrandId()){
+async function findOrCreateCustomer(customer,brandId){
  if(!supabase||!customer?.phone)return null;
  const phone=String(customer.phone).trim();if(!phone)return null;
  const payload={name:String(customer.name||"").trim(),phone,email:customer.email?.trim()||null,city:customer.city?.trim()||null,address:customer.address?.trim()||null};
