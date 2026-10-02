@@ -33,6 +33,7 @@
 <div id="modalBack" class="modal-back hidden"><div id="modal" class="modal"></div></div>
 <script>
 const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])),money=v=>"EGP "+Number(v||0).toLocaleString("en-EG",{maximumFractionDigits:2});
+function toast(message,type="success"){let el=$("#bpcToast");if(!el){el=document.createElement("div");el.id="bpcToast";el.style.cssText="position:fixed;right:22px;bottom:22px;z-index:100000;max-width:min(420px,calc(100vw - 44px));padding:14px 18px;border-radius:12px;background:#173f32;color:#fff;box-shadow:0 14px 40px #0003;font:600 14px Arial,sans-serif;opacity:0;transform:translateY(10px);transition:.2s";document.body.appendChild(el)}el.textContent=message;el.style.background=type==="error"?"#8b2635":"#173f32";el.style.opacity="1";el.style.transform="none";clearTimeout(window.__bpcToastTimer);window.__bpcToastTimer=setTimeout(()=>{el.style.opacity="0";el.style.transform="translateY(10px)"},3500)}
 let token=sessionStorage.getItem("bpc_admin_token")||"",profile=null,tenantBrand=null,current="dashboard",cache={};
 const mainNav=[["dashboard","Dashboard"],["products","Products"],["inventory","Inventory"],["orders","Orders"],["customers","Customers"]];
 const managementNav=[["returns","Returns"],["expenses","Expenses"],["reports","Reports"],["settings","Settings"]];
