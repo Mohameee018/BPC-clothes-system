@@ -137,6 +137,7 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
    if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
    return r.status(500).json({error:"Could not process return."});
  }
+ // Keep Orders, Returns, Customer totals and Revenue in sync after a successful return.
  const synced=await supabase.from("orders").update({order_status:"cancelled",delivery_status:"Returned",updated_at:new Date().toISOString()}).eq("id",order_id).eq("brand_id",q.tenant.brandId).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
  if(synced.error||!synced.data)return r.status(500).json({error:"Return processed, but the order status could not be synchronized."});
  r.json({ok:true,processed:result.data===true,order:synced.data});
