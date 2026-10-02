@@ -49,7 +49,68 @@ function go(page){current=page;document.querySelectorAll("[data-nav]").forEach(b
 function pill(v){const s=String(v||"—"),bad=/cancel|return|failed|inactive|damaged/i.test(s),warn=/pending|prepar|out|shipping/i.test(s);return '<span class="pill '+(bad?"bad":warn?"warn":"")+'">'+esc(s)+"</span>"}
 function renderSubscription(sub){const el=$("#subscriptionBadge"),warn=$("#subscriptionWarning");if(!sub){el.innerHTML="";return}const date=sub.expires_at?new Date(sub.expires_at).toLocaleString("ar-EG",{dateStyle:"medium",timeStyle:"short"}):"—";el.innerHTML='<div style="font-size:11px;margin-top:3px">'+esc(sub.plan?.name||"Subscription")+" · "+esc(date)+"</div>";if(sub.warning){warn.classList.remove("hidden");warn.innerHTML="⚠️ اشتراكك قرب يخلص — "+esc(date)}}
 async function render(){const c=$("#content");c.innerHTML='<div class="panel">Loading…</div>';try{if(current==="dashboard")return dashboard(c);if(current==="products")return products(c);if(current==="inventory")return inventory(c);if(current==="orders")return orders(c);if(current==="customers")return crud(c,"customers","Customers",["name","phone","email","city","address","status","total_orders","total_spent"]);if(current==="returns")return returns(c);if(current==="expenses")return expenses(c);if(current==="reports")return reports(c);if(current==="settings")return settings(c)}catch(e){c.innerHTML='<div class="panel error" style="color:#a94444">'+esc(e.message)+'</div>'}}
-async function dashboard(c){const d=await api("/api/system/summary");c.innerHTML='<div class="cards five">'+[["Total Sales",money(d.revenue)],["Products",d.counts.products],["Inventory",d.counts.inventory],["Customers",d.counts.customers],["Orders",d.counts.orders]].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="num">'+x[1]+'</div></div>').join("")+'</div><div class="grid2" style="margin-top:16px"><div class="panel"><div class="section-title"><h2>System modules</h2></div><div class="statline">'+navItems.slice(1).map(x=>'<button class="btn" data-q="'+x[0]+'">'+x[1]+'</button>').join("")+'</div></div><div class="panel"><div class="section-title"><h2>Business overview</h2></div><p class="muted">Web version follows the desktop system structure: Products, Inventory, Orders, Customers, Returns, Expenses, Reports and Settings.</p></div></div>';c.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>go(b.dataset.q))}
+async async function getProfitRange(period){
+ const now=new Date(),startMonth=new Date(now.getFullYear(),now.getMonth(),1),nextMonth=new Date(now.getFullYear(),now.getMonth()+1,1);
+ if(period==="Last Month")return {from:new Date(now.getFullYear(),now.getMonth()-1,1),to:startMonth};
+ if(period==="Last 12 Months")return {from:new Date(now.getFullYear(),now.getMonth()-11,1),to:nextMonth};
+ if(period==="Since Brand Start"){const brandDate=tenantBrand?.created_at?new Date(tenantBrand.created_at):new Date(2000,0,1);return {from:new Date(brandDate.getFullYear(),brandDate.getMonth(),1),to:nextMonth}}
+ return {from:startMonth,to:nextMonth};
+}
+async function loadProfitData(){
+ const [orders,expenses,products,returns]=await Promise.all([api("/api/admin/orders"),api("/api/system/expenses?limit=500"),api("/api/system/products?limit=500"),api("/api/system/returns?limit=500")]);
+ const productCosts=new Map(products.map(p=>[String(p.id),Number(p.cost_price||0)]));
+ const returnByOrder=new Map();
+ returns.forEach(x=>{if(x.order_id)returnByOrder.set(String(x.order_id),x)});
+ const orderCogs=o=>(o.order_items||[]).reduce((n,i)=>{const itemCost=Number(i.cost_price||0),fallback=Number(productCosts.get(String(i.product_id))||0);return n+Number(i.quantity||0)*(itemCost>0?itemCost:fallback)},0);
+ return {orders,expenses,returns,returnByOrder,orderCogs};
+}
+function calculateProfit(data,r){
+ const inRange=v=>{const d=new Date(v||"");return Number.isFinite(d.getTime())&&d>=r.from&&d<r.to};
+ let sales=0,cost=0,expenses=0,refunds=0,scrapLoss=0,ordersCount=0;
+ data.orders.forEach(o=>{
+   const ret=data.returnByOrder.get(String(o.id));
+   const valid=!ret&&!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   if(valid&&inRange(o.created_at)){sales+=Number(o.total_amount||0);cost+=data.orderCogs(o);ordersCount++}
+ });
+ data.expenses.forEach(x=>{if(inRange(x.expense_date||x.created_at))expenses+=Number(x.amount||0)});
+ data.returns.forEach(x=>{
+   if(!inRange(x.created_at))return;
+   refunds+=Number(x.refund_amount||0);
+   if(x.disposition==="Scrap / Damaged")scrapLoss+=Number(x.loss||0);
+ });
+ return {sales,cost,expenses,refunds,scrapLoss,orders:ordersCount,profit:sales-cost-expenses-scrapLoss};
+}
+function buildProfitBuckets(data,r){
+ const span=r.to-r.from,monthly=span>62*86400000;
+ const map=new Map();
+ const keyFor=d=>monthly?d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"):d.toISOString().slice(0,10);
+ const labelFor=k=>monthly?k:new Date(k+"T00:00:00").toLocaleDateString("en-EG",{day:"2-digit",month:"short",year:"numeric"});
+ const bucket=k=>{if(!map.has(k))map.set(k,{date:labelFor(k),_key:k,sales:0,cost:0,expenses:0,orders:0,returns:0,scrapLoss:0,profit:0});return map.get(k)};
+ data.orders.forEach(o=>{
+   const ret=data.returnByOrder.get(String(o.id));
+   const valid=!ret&&!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   if(!valid)return;const d=new Date(o.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.sales+=Number(o.total_amount||0);b.cost+=data.orderCogs(o);b.orders++;
+ });
+ data.expenses.forEach(x=>{const d=new Date(x.expense_date||x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;bucket(keyFor(d)).expenses+=Number(x.amount||0)});
+ data.returns.forEach(x=>{const d=new Date(x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.returns+=Number(x.refund_amount||0);if(x.disposition==="Scrap / Damaged")b.scrapLoss+=Number(x.loss||0)});
+ const rows=[...map.values()].sort((a,b)=>a._key.localeCompare(b._key));rows.forEach(b=>b.profit=b.sales-b.cost-b.expenses-b.scrapLoss);return rows;
+}
+function profitChart(rows,title){
+ if(!rows.length)return '<div class="panel"><div class="section-title"><h2>'+esc(title)+'</h2></div><div class="empty">No profit data for this period.</div></div>';
+ const w=900,h=330,p=48,vals=rows.map(x=>Number(x.profit||0)),min=Math.min(0,...vals),max=Math.max(0,...vals),range=max-min||1;
+ const x=i=>p+(rows.length===1?0:(w-p*2)*i/(rows.length-1)),y=v=p+(h-p*1.35)*(max-v)/range;
+ const points=rows.map((r,i)=>x(i)+","+y(r.profit)).join(" "),zero=y(0);
+ const labels=rows.map((r,i)=>i===0||i===rows.length-1||rows.length<=8||i%Math.ceil(rows.length/8)===0?'<text x="'+x(i)+'" y="'+(h-12)+'" text-anchor="middle" class="chart-label">'+esc(r.date)+'</text>':"").join("");
+ const dots=rows.map((r,i)=>'<circle cx="'+x(i)+'" cy="'+y(r.profit)+'" r="4" class="profit-dot"><title>'+esc(r.date)+' — '+esc(money(r.profit))+'</title></circle>').join("");
+ return '<div class="panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="muted" style="color:#2f9e62;font-weight:700">ده جدول الـ Net Profit حسب التاريخ</div></div><span class="muted">Green = profit • Red = loss</span></div><div style="overflow-x:auto"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;min-width:680px;height:330px;display:block"><line x1="'+p+'" y1="'+zero+'" x2="'+(w-p)+'" y2="'+zero+'" class="chart-zero"/><polyline points="'+points+'" fill="none" class="profit-line"/>'+dots+labels+'</svg></div></div>';
+}
+function dashboard(c){
+ const [summary,data]=await Promise.all([api("/api/system/summary"),loadProfitData()]);
+ const rows=buildProfitBuckets(data,getProfitRange("This Month"));
+ c.innerHTML='<div class="cards five">'+[["Total Sales",money(summary.revenue)],["Products",summary.counts.products],["Inventory",summary.counts.inventory],["Customers",summary.counts.customers],["Orders",summary.counts.orders]].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="num">'+x[1]+'</div></div>').join("")+'</div><div class="grid2" style="margin-top:16px"><div class="panel"><div class="section-title"><h2>System modules</h2></div><div class="statline">'+navItems.slice(1).map(x=>'<button class="btn" data-q="'+x[0]+'">'+x[1]+'</button>').join("")+'</div></div><div class="panel"><div class="section-title"><h2>Business overview</h2></div><div id="dashboardProfitChart"></div></div></div>';
+ $("#dashboardProfitChart").innerHTML=profitChart(rows,"Net Profit");
+ c.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>go(b.dataset.q));
+}
 function table(rows,fields,actions=true){return '<div class="panel"><div class="table-wrap"><table class="table"><thead><tr>'+fields.map(f=>'<th>'+(f==="adjust"?"Action":f.replaceAll("_"," "))+"</th>").join("")+(actions?"<th></th>":"")+'</tr></thead><tbody>'+rows.map(x=>'<tr>'+fields.map(f=>'<td>'+((f==="price"||f==="cost_price"||f==="amount"||f==="total_spent"||f==="total_amount"||f==="sales"||f==="expenses"||f==="returns"||f==="discount"||f==="shipping_amount"||f==="refund_amount"||f==="loss"||f==="cost"||f==="profit")?money(x[f]):(f==="active"||f==="is_active"?pill(x[f]?"Active":"Inactive"):(f==="adjust"?'<button class="btn" data-adjust="'+esc(x.id)+'">Adjust Stock</button>':esc(x[f]??"—"))))+"</td>").join("")+(actions?'<td><button class="btn" data-edit="'+esc(x.id)+'">Edit</button> <button class="btn danger" data-del="'+esc(x.id)+'">Delete</button></td>':"")+"</tr>").join("")||'<tr><td colspan="'+(fields.length+(actions?1:0))+'" class="empty">No records.</td></tr></tbody></table></div></div>'}
 async function crud(c,resource,title,fields){const rows=await api("/api/system/"+resource+"?limit=500");cache[resource]=rows;c.innerHTML='<div class="toolbar"><div class="left"><input id="search" class="search" placeholder="Search '+title+'…"></div><div class="right"><button class="btn blue" id="add">+ New '+title.replace(/s$/,"")+'</button></div></div><div id="table"></div>';const draw=t=>{$("#table").innerHTML=table(rows.filter(x=>JSON.stringify(x).toLowerCase().includes(t.toLowerCase())),fields)};draw("");$("#search").oninput=e=>draw(e.target.value);$("#add").onclick=()=>formModal(resource,title,fields,null);$("#table").onclick=e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.edit)formModal(resource,title,fields,rows.find(x=>x.id===b.dataset.edit));if(b.dataset.del)removeRow(resource,b.dataset.del)}}
 async function removeRow(resource,id){if(!confirm("Delete this record?"))return;try{await api("/api/system/"+resource+"/"+id,{method:"DELETE"});await render()}catch(e){alert(e.message)}}
@@ -142,12 +203,9 @@ async function expenses(c){
  $("#expenseTable").onclick=e=>{const b=e.target.closest("button");if(!b)return;if(b.dataset.edit)formModal("expenses","Expenses",fields,rows.find(x=>x.id===b.dataset.edit));if(b.dataset.del)removeRow("expenses",b.dataset.del)};
 }
 async function reports(c){
- const [orders,expenses,products,returns]=await Promise.all([api("/api/admin/orders"),api("/api/system/expenses?limit=500"),api("/api/system/products?limit=500"),api("/api/system/returns?limit=500")]);
- const productCosts=new Map(products.map(p=>[p.id,Number(p.cost_price||0)]));
- c.innerHTML='<div class="toolbar"><div><h2 style="font:700 24px Oswald;margin:0">Reports</h2><div class="muted">Sales, cost of goods, expenses and returns</div></div><select id="period"><option>This Month</option><option>Last Month</option><option>Last 3 Months</option><option>This Year</option></select></div><div id="reportCards" class="cards"></div><div class="panel" style="margin-top:16px"><div class="section-title"><h2>Monthly Performance</h2></div><div id="reportTable"></div></div>';
- const range=period=>{const now=new Date(),from=new Date(now.getFullYear(),now.getMonth(),1),to=new Date(now.getFullYear(),now.getMonth()+1,1);if(period==="Last Month")return {from:new Date(now.getFullYear(),now.getMonth()-1,1),to:from};if(period==="Last 3 Months")return {from:new Date(now.getFullYear(),now.getMonth()-2,1),to:new Date(now.getFullYear(),now.getMonth()+1,1)};if(period==="This Year")return {from:new Date(now.getFullYear(),0,1),to:new Date(now.getFullYear()+1,0,1)};return {from,to}};
- const inRange=(value,r)=>{if(!value)return false;const d=new Date(value);return Number.isFinite(d.getTime())&&d>=r.from&&d<r.to};
- const build=()=>{const r=range($("#period").value),valid=orders.filter(o=>!(/cancel|failed|return/i.test((o.order_status||"")+" "+(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status))&&inRange(o.created_at,r)),exRows=expenses.filter(x=>inRange(x.expense_date||x.created_at,r)),retRows=returns.filter(x=>inRange(x.created_at,r));const sales=valid.reduce((n,o)=>n+Number(o.total_amount||0),0),cost=valid.reduce((n,o)=>n+(o.order_items||[]).reduce((m,i)=>m+Number(i.quantity||0)*Number(i.cost_price||productCosts.get(i.product_id)||0),0),0),scrapLoss=retRows.filter(x=>x.disposition==="Scrap / Damaged").reduce((n,x)=>n+Number(x.loss||0),0),ex=exRows.reduce((n,x)=>n+Number(x.amount||0),0),refunds=retRows.reduce((n,x)=>n+Number(x.refund_amount||0),0),profit=sales-cost-ex-scrapLoss;$("#reportCards").innerHTML=[["Total Sales",money(sales)],["Cost of Goods",money(cost)],["Expenses",money(ex)],["Returns / Refunds",money(refunds)],["Net Profit",money(profit)],["Total Orders",valid.length]].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="num">'+x[1]+'</div></div>').join("");const months=new Map();const getMonth=v=>String(v||"").slice(0,7);const bucket=m=>{if(!months.has(m))months.set(m,{month:m,sales:0,cost:0,expenses:0,orders:0,returns:0,profit:0});return months.get(m)};valid.forEach(o=>{const b=bucket(getMonth(o.created_at));b.sales+=Number(o.total_amount||0);b.cost+=(o.order_items||[]).reduce((n,i)=>n+Number(i.quantity||0)*Number(i.cost_price||productCosts.get(i.product_id)||0),0);b.orders++});exRows.forEach(x=>bucket(getMonth(x.expense_date||x.created_at)).expenses+=Number(x.amount||0));retRows.forEach(x=>{const b=bucket(getMonth(x.created_at));b.returns+=Number(x.refund_amount||0);if(x.disposition==="Scrap / Damaged")b.cost+=Number(x.loss||0)});[...months.values()].forEach(b=>b.profit=b.sales-b.cost-b.expenses);$("#reportTable").innerHTML=table([...months.values()].sort((a,b)=>b.month.localeCompare(a.month)),["month","sales","cost","expenses","orders","returns","profit"],false)||'<div class="empty">No report data for this period.</div>'};
+ const data=await loadProfitData();
+ c.innerHTML='<div class="toolbar"><div><h2 style="font:700 24px Oswald;margin:0">Reports</h2><div class="muted">Sales, cost of goods, expenses and returns</div></div><select id="period"><option>This Month</option><option>Last Month</option><option>Last 12 Months</option><option>Since Brand Start</option></select></div><div id="reportCards" class="cards"></div><div id="reportProfitChart" style="margin-top:16px"></div><div class="panel" style="margin-top:16px"><div class="section-title"><h2>Monthly Performance</h2></div><div id="reportTable"></div></div>';
+ const build=()=>{const period=$("#period").value,r=getProfitRange(period),model=calculateProfit(data,r),rows=buildProfitBuckets(data,r);$("#reportCards").innerHTML=[["Total Sales",money(model.sales)],["Cost of Goods",money(model.cost)],["Expenses",money(model.expenses)],["Returns / Refunds",money(model.refunds)],["Net Profit",money(model.profit)],["Total Orders",model.orders]].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="num">'+x[1]+'</div></div>').join("");$("#reportProfitChart").innerHTML=profitChart(rows,"Net Profit");$("#reportTable").innerHTML=table(rows,["date","sales","cost","expenses","orders","returns","profit"],false)||'<div class="empty">No report data for this period.</div>'};
  $("#period").onchange=build;build();
 }
 async function settings(c){
