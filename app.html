@@ -68,31 +68,38 @@ function calculateProfit(data,r){
  const inRange=v=>{const d=new Date(v||"");return Number.isFinite(d.getTime())&&d>=r.from&&d<r.to};
  let sales=0,cost=0,expenses=0,refunds=0,scrapLoss=0,ordersCount=0;
  data.orders.forEach(o=>{
-   const ret=data.returnByOrder.get(String(o.id));
-   const valid=!ret&&!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
-   if(valid&&inRange(o.created_at)){sales+=Number(o.total_amount||0);cost+=data.orderCogs(o);ordersCount++}
+   const eligible=!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   if(eligible&&inRange(o.created_at)){sales+=Number(o.total_amount||0);cost+=data.orderCogs(o);ordersCount++}
  });
- data.expenses.forEach(x=>{if(inRange(x.expense_date||x.created_at))expenses+=Number(x.amount||0)});
  data.returns.forEach(x=>{
    if(!inRange(x.created_at))return;
+   const order=data.orders.find(o=>String(o.id)===String(x.order_id));
+   const cogs=order?data.orderCogs(order):0;
    refunds+=Number(x.refund_amount||0);
+   sales-=Number(x.refund_amount||0);
+   cost-=cogs;
    if(x.disposition==="Scrap / Damaged")scrapLoss+=Number(x.loss||0);
  });
+ data.expenses.forEach(x=>{if(inRange(x.expense_date||x.created_at))expenses+=Number(x.amount||0)});
  return {sales,cost,expenses,refunds,scrapLoss,orders:ordersCount,profit:sales-cost-expenses-scrapLoss};
 }
 function buildProfitBuckets(data,r){
  const span=r.to-r.from,monthly=span>62*86400000;
  const map=new Map();
  const keyFor=d=>monthly?d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"):d.toISOString().slice(0,10);
- const labelFor=k=>monthly?k:new Date(k+"T00:00:00").toLocaleDateString("en-EG",{day:"2-digit",month:"short",year:"numeric"});
+ const labelFor=k=>monthly?new Date(k+"-01T00:00:00").toLocaleDateString("en-EG",{month:"short",year:"numeric"}):new Date(k+"T00:00:00").toLocaleDateString("en-EG",{day:"2-digit",month:"short",year:"numeric"});
  const bucket=k=>{if(!map.has(k))map.set(k,{date:labelFor(k),_key:k,sales:0,cost:0,expenses:0,orders:0,returns:0,scrapLoss:0,profit:0});return map.get(k)};
  data.orders.forEach(o=>{
-   const ret=data.returnByOrder.get(String(o.id));
-   const valid=!ret&&!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
-   if(!valid)return;const d=new Date(o.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.sales+=Number(o.total_amount||0);b.cost+=data.orderCogs(o);b.orders++;
+   const eligible=!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   if(!eligible)return;const d=new Date(o.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.sales+=Number(o.total_amount||0);b.cost+=data.orderCogs(o);b.orders++;
  });
  data.expenses.forEach(x=>{const d=new Date(x.expense_date||x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;bucket(keyFor(d)).expenses+=Number(x.amount||0)});
- data.returns.forEach(x=>{const d=new Date(x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.returns+=Number(x.refund_amount||0);if(x.disposition==="Scrap / Damaged")b.scrapLoss+=Number(x.loss||0)});
+ data.returns.forEach(x=>{
+   const d=new Date(x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;
+   const b=bucket(keyFor(d)),order=data.orders.find(o=>String(o.id)===String(x.order_id)),cogs=order?data.orderCogs(order):0;
+   b.returns+=Number(x.refund_amount||0);b.sales-=Number(x.refund_amount||0);b.cost-=cogs;
+   if(x.disposition==="Scrap / Damaged")b.scrapLoss+=Number(x.loss||0);
+ });
  const rows=[...map.values()].sort((a,b)=>a._key.localeCompare(b._key));rows.forEach(b=>b.profit=b.sales-b.cost-b.expenses-b.scrapLoss);return rows;
 }
 function profitChart(rows,title){
