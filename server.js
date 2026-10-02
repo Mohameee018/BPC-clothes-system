@@ -20,9 +20,27 @@ app.use((q,r,next)=>blockedStatic.test(q.path)?r.status(404).end():next());
 app.use(express.static(__dirname,{index:false,etag:true,maxAge:"1h",setHeaders:(res,file)=>{if(path.extname(file).toLowerCase()===".html")res.setHeader("Cache-Control","public, max-age=0, must-revalidate")}}));
 const SUPABASE_SERVER_KEY=process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY||"";
 const supabase=process.env.SUPABASE_URL&&SUPABASE_SERVER_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_SERVER_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
-const rateBuckets=new Map();
-function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
-setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
+async function consumeRateLimit({windowMs=60000,max=60,keyPrefix="api"}={},q,r){
+ const ip=String(q.ip||q.headers?.["x-forwarded-for"]||"unknown").split(",")[0].trim().slice(0,120);
+ const key=keyPrefix+":"+ip+":"+String(q.path||"").slice(0,180);
+ if(!supabase)return {allowed:false,error:"Supabase is not configured."};
+ const result=await supabase.rpc("check_api_rate_limit",{
+  p_bucket_key:key,
+  p_window_seconds:Math.max(1,Math.ceil(windowMs/1000)),
+  p_max_requests:Math.max(1,Math.floor(max))
+ });
+ if(result.error){
+  console.error("Distributed rate limiter error:",result.error.message);
+  return {allowed:false,error:"Rate limiter unavailable."};
+ }
+ return {allowed:result.data===true};
+}
+function rateLimit(options={}){return async(q,r,next)=>{
+ const result=await consumeRateLimit(options,q,r);
+ if(result.error)return r.status(503).json({error:"Request protection is temporarily unavailable. Please try again."});
+ if(!result.allowed)return r.status(429).json({error:"Too many requests. Please try again later."});
+ next();
+}}
 // Protect all super-admin API endpoints from brute-force/request flooding without affecting other app routes.
 app.use("/api/admin",rateLimit({windowMs:60*1000,max:120,keyPrefix:"admin-api"}));
 async function resolvePublicBrand(req){
