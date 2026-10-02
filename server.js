@@ -138,7 +138,8 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
    return r.status(500).json({error:"Could not process return."});
  }
  // Keep Orders, Returns, Customer totals and Revenue in sync after a successful return.
- const synced=await supabase.from("orders").update({order_status:"cancelled",delivery_status:"Returned",stock_reserved:false,updated_at:new Date().toISOString()}).eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
+ const finalDisposition=String(disposition||"Return to Stock")==="Scrap / Damaged"?"Damaged":"Returned";
+ const synced=await supabase.from("orders").update({order_status:"cancelled",delivery_status:finalDisposition,stock_reserved:false,updated_at:new Date().toISOString()}).eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
  if(synced.error||!synced.data)return r.status(500).json({error:"Return processed, but the order status could not be synchronized."});
  r.json({ok:true,processed:result.data===true,order:synced.data});
 });
@@ -147,12 +148,12 @@ app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  const {order_id,order_status,delivery_status}=q.body||{};
  if(!order_id||(!order_status&&!delivery_status))return r.status(400).json({error:"Missing order status."});
  const orderStatuses=["Not Prepared","Preparing","Prepared","Completed"];
- const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned"];
+ const deliveryStatuses=["Pending","With Shipping Company","Out for Delivery","Delivered","Returned","Damaged"];
  if(order_status&&!orderStatuses.includes(String(order_status)))return r.status(400).json({error:"Invalid order status."});
  if(delivery_status&&!deliveryStatuses.includes(String(delivery_status)))return r.status(400).json({error:"Invalid delivery status."});
  const patch={}; if(order_status)patch.order_status=String(order_status); if(delivery_status)patch.delivery_status=String(delivery_status);
  if(delivery_status==="Returned"){
-   const owned=await supabase.from("orders").select("id,total_amount,stock_reserved").eq("id",order_id).eq("brand_id",brandId).eq("source","website").maybeSingle();
+   const owned=await supabase.from("orders").select("id,total_amount,stock_reserved").eq("id",order_id).eq("brand_id",q.brandId).eq("source","website").maybeSingle();
    if(owned.error)return r.status(500).json({error:"Internal server error."});
    if(!owned.data)return r.status(404).json({error:"Website order not found."});
    const returned=await supabase.rpc("process_whole_order_return",{p_order_id:order_id,p_reason:"Customer Return",p_disposition:"Return to Stock",p_refund_amount:Number(owned.data.total_amount||0),p_loss:0});
