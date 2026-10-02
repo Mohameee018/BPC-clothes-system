@@ -864,7 +864,26 @@ app.patch("/api/system/:table/:id",async(q,r)=>{
 app.delete("/api/system/:table/:id",async(q,r)=>{
   const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
   const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
-  const del=await supabase.from(table).delete().eq("id",q.params.id).eq("brand_id",q.brandId);if(del.error)return r.status(400).json({error:"Could not delete record.",detail:del.error.message});r.json({ok:true});
+  if(table==="products"){
+    const product=await supabase.from("products").select("id,name").eq("id",q.params.id).eq("brand_id",q.brandId).maybeSingle();
+    if(product.error)return r.status(500).json({error:"Could not verify product."});
+    if(!product.data)return r.status(404).json({error:"Product not found."});
+    const used=await supabase.from("order_items").select("id",{count:"exact",head:true}).eq("product_id",q.params.id);
+    if(used.error)return r.status(500).json({error:"Could not verify product usage."});
+    if((used.count||0)>0)return r.status(409).json({error:"This product is already used in orders and cannot be permanently deleted. Deactivate it instead."});
+    const [imgs,inv,vars]=await Promise.all([
+      supabase.from("product_images").delete().eq("product_id",q.params.id).eq("brand_id",q.brandId),
+      supabase.from("inventory").delete().eq("product_id",q.params.id).eq("brand_id",q.brandId),
+      supabase.from("product_variants").delete().eq("product_id",q.params.id).eq("brand_id",q.brandId)
+    ]);
+    if(imgs.error||inv.error||vars.error)return r.status(400).json({error:"Could not remove all product data.",detail:(imgs.error||inv.error||vars.error)?.message});
+    const del=await supabase.from("products").delete().eq("id",q.params.id).eq("brand_id",q.brandId);
+    if(del.error)return r.status(400).json({error:"Could not permanently delete product.",detail:del.error.message});
+    return r.json({ok:true,deleted:true});
+  }
+  const del=await supabase.from(table).delete().eq("id",q.params.id).eq("brand_id",q.brandId);
+  if(del.error)return r.status(400).json({error:"Could not delete record.",detail:del.error.message});
+  r.json({ok:true});
 });
 
 /* Railway healthcheck: keep this endpoint lightweight and independent of external services.
