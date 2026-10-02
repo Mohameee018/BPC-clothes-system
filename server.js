@@ -345,20 +345,8 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  r.json({access_token:signed.data.session.access_token,refresh_token:signed.data.session.refresh_token,expires_at:signed.data.session.expires_at,user:{id:user.id,email:user.email||null},profile,brand:brand.data,subscription:gate.view});
 });
 async function ensureSubscriberWorkspace(user,profile){
- if(!supabase||!user?.id||!profile?.brand_id||isSuperAdminUser(user))return profile;
- const configured=platformBrandId();
- const sub=await getSubscriptionForUser(user.id);
- if(!sub||String(sub.brand_id)!==configured||String(profile.brand_id)!==configured)return profile;
- const name=String(profile.name||user.user_metadata?.name||"Store").trim()||"Store";
- const baseSlug=name.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"store";
- const brandId=crypto.randomUUID(),slug=baseSlug+"-"+crypto.randomBytes(4).toString("hex");
- const created=await supabase.from("brands").insert({id:brandId,name:name+" Store",slug,active:true,website_url:null,settings:{}}).select("id").single();
- if(created.error)return profile;
- const pu=await supabase.from("profiles").update({brand_id:brandId}).eq("id",user.id).eq("brand_id",configured);
- if(pu.error){await supabase.from("brands").delete().eq("id",brandId);return profile;}
- const su=await supabase.from("subscriptions").update({brand_id:brandId,updated_at:new Date().toISOString()}).eq("id",sub.id).eq("auth_user_id",user.id).eq("brand_id",configured);
- if(su.error){await supabase.from("profiles").update({brand_id:configured}).eq("id",user.id).eq("brand_id",brandId);await supabase.from("brands").delete().eq("id",brandId);return profile;}
- return {...profile,brand_id:brandId};
+  // The authenticated profile's brand_id is the tenant boundary. No legacy global-brand migration is performed here.
+  return profile;
 }
 function isSuperAdminUser(user){
  const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
