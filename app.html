@@ -68,7 +68,7 @@ function calculateProfit(data,r){
  const inRange=v=>{const d=new Date(v||"");return Number.isFinite(d.getTime())&&d>=r.from&&d<r.to};
  let sales=0,cost=0,expenses=0,refunds=0,scrapLoss=0,ordersCount=0;
  data.orders.forEach(o=>{
-   const eligible=!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   const hasReturn=data.returnByOrder.has(String(o.id)); const eligible=hasReturn?(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status)):(!/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||""))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status)));
    if(eligible&&inRange(o.created_at)){sales+=Number(o.total_amount||0);cost+=data.orderCogs(o);ordersCount++}
  });
  data.returns.forEach(x=>{
@@ -90,7 +90,7 @@ function buildProfitBuckets(data,r){
  const labelFor=k=>monthly?new Date(k+"-01T00:00:00").toLocaleDateString("en-EG",{month:"short",year:"numeric"}):new Date(k+"T00:00:00").toLocaleDateString("en-EG",{day:"2-digit",month:"short",year:"numeric"});
  const bucket=k=>{if(!map.has(k))map.set(k,{date:labelFor(k),_key:k,sales:0,cost:0,expenses:0,orders:0,returns:0,scrapLoss:0,profit:0});return map.get(k)};
  data.orders.forEach(o=>{
-   const eligible=!(/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||"")))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status));
+   const hasReturn=data.returnByOrder.has(String(o.id)); const eligible=hasReturn?(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status)):(!/cancel|failed|return|damaged/i.test(String(o.order_status||"")+" "+String(o.delivery_status||""))&&(o.payment_status==="paid"||["confirmed","Completed"].includes(o.order_status)));
    if(!eligible)return;const d=new Date(o.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;const b=bucket(keyFor(d));b.sales+=Number(o.total_amount||0);b.cost+=data.orderCogs(o);b.orders++;
  });
  data.expenses.forEach(x=>{const d=new Date(x.expense_date||x.created_at||"");if(!Number.isFinite(d.getTime())||d<r.from||d>=r.to)return;bucket(keyFor(d)).expenses+=Number(x.amount||0)});
