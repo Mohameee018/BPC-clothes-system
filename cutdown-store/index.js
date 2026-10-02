@@ -9,8 +9,7 @@ import {createClient} from "@supabase/supabase-js";
 dotenv.config();
 const __dirname=path.dirname(fileURLToPath(import.meta.url)),app=express();
 app.set("trust proxy",1);app.disable("x-powered-by");
-const base=process.env.PUBLIC_BASE_URL||"";
-const allowedOrigins=String(process.env.CORS_ORIGINS||base||"").split(",").map(x=>x.trim().replace(/\/$/,"")).filter(Boolean);
+const allowedOrigins=String(process.env.CORS_ORIGINS||"").split(",").map(x=>x.trim().replace(/\/$/,"")).filter(Boolean);
 app.use(cors({origin:(origin,cb)=>{if(!origin||allowedOrigins.includes(origin))return cb(null,true);return cb(null,false);},methods:["GET","POST","OPTIONS"],allowedHeaders:["Authorization","Content-Type"]}));
 app.use((q,r,next)=>{if(q.headers.authorization)r.setHeader("Cache-Control","no-store");r.setHeader("X-Content-Type-Options","nosniff");r.setHeader("X-Frame-Options","DENY");r.setHeader("Referrer-Policy","strict-origin-when-cross-origin");r.setHeader("Permissions-Policy","camera=(),microphone=(),geolocation=()");if(q.secure)r.setHeader("Strict-Transport-Security","max-age=31536000; includeSubDomains");next()});
 app.use(compression({threshold:"1kb"}));
@@ -22,16 +21,22 @@ const supabase=process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY?c
 const rateBuckets=new Map();
 function rateLimit({windowMs=60000,max=60,keyPrefix="api"}={}){return (q,r,next)=>{const now=Date.now(),key=keyPrefix+":"+q.ip+":"+q.path,old=rateBuckets.get(key)||{start:now,count:0};if(now-old.start>=windowMs){old.start=now;old.count=0}old.count++;rateBuckets.set(key,old);if(old.count>max)return r.status(429).json({error:"Too many requests. Please try again later."});next()}}
 setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const [k,v] of rateBuckets)if(v.start<cutoff)rateBuckets.delete(k)},5*60*1000).unref();
-const DEFAULT_BRAND_ID="00000000-0000-4000-8000-000000000001";
-const configuredBrandId=()=>String(process.env.CUTDOWN_BRAND_ID||DEFAULT_BRAND_ID).trim();
 async function resolvePublicBrand(req){
  if(!supabase)return null;
- const requested=String(req.query?.brand||req.body?.brand_slug||"").trim().toLowerCase();
- if(requested){const found=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("slug",requested).eq("active",true).maybeSingle();if(found.error)throw found.error;return found.data||null;}
  const host=String(req.headers?.host||"").split(":")[0].toLowerCase();
- const baseHost=(()=>{try{return new URL(process.env.PUBLIC_BASE_URL||"").hostname.toLowerCase()}catch{return ""}})();
- if(host&&(!baseHost||host!==baseHost)){const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);if(brands.error)throw brands.error;const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});if(match)return match;}
- const fallback=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("id",configuredBrandId()).eq("active",true).maybeSingle();if(fallback.error)throw fallback.error;return fallback.data||null;
+ if(host){
+   const brands=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("active",true).not("website_url","is",null).limit(500);
+   if(brands.error)throw brands.error;
+   const match=(brands.data||[]).find(b=>{try{return new URL(String(b.website_url||"")).hostname.toLowerCase()===host}catch{return false}});
+   if(match)return match;
+ }
+ const requested=String(req.query?.brand||req.body?.brand_slug||"").trim().toLowerCase();
+ if(requested){
+   const found=await supabase.from("brands").select("id,name,slug,active,website_url,settings").eq("slug",requested).eq("active",true).maybeSingle();
+   if(found.error)throw found.error;
+   return found.data||null;
+ }
+ return null;
 }
 
 async function requireDesktopSync(q,r,next){
@@ -43,7 +48,8 @@ async function requireDesktopSync(q,r,next){
   const profile=await getAuthProfile(user.id);
   if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Brand administrator access required."});
   const brandId=String(profile.brand_id);
-  if(brandId!==configuredBrandId())return r.status(403).json({error:"This desktop installation is not assigned to this brand."});
+  const brand=await supabase.from("brands").select("id,active").eq("id",brandId).maybeSingle();
+  if(brand.error||!brand.data?.active)return r.status(403).json({error:"This brand is inactive or unavailable."});
   q.brandId=brandId;
   q.desktopUser=user;
   next();
@@ -222,7 +228,7 @@ app.get("/api/desktop/update",async(q,r)=>{
 app.get("/api/public-config",async(q,r)=>{if(!process.env.SUPABASE_URL)return r.status(503).json({error:"Supabase URL is not configured."});try{const brand=await resolvePublicBrand(q);if(!brand)return r.status(404).json({error:"Store brand not found or inactive."});r.json({supabaseUrl:process.env.SUPABASE_URL,supabaseKey:SUPABASE_PUBLISHABLE_KEY,brandId:brand.id,brandSlug:brand.slug,brandName:brand.name,settings:brand.settings&&typeof brand.settings==="object"?brand.settings:{}})}catch{return r.status(503).json({error:"Could not resolve store brand."})}});
 app.get("/api/auth/me",async(q,r)=>{const user=await getAuthUser(q);if(!user)return r.status(401).json({error:"Not authenticated."});r.json({user:{id:user.id,email:user.email||null},profile:await getAuthProfile(user.id)})});
 
-async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||String(profile.brand_id)!==configuredBrandId())return null;return {user,profile};}
+async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!user)return null;const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return null;const brand=await supabase.from("brands").select("id,active").eq("id",profile.brand_id).maybeSingle();if(brand.error||!brand.data?.active)return null;return {user,profile};}
 app.get("/api/admin/ping",async(q,r)=>{const admin=await requireBrandAdmin(q,r);if(!admin)return r.status(403).json({error:"Admin access required."});r.json({ok:true,admin:true,brand_id:admin.profile.brand_id})});
 app.post("/api/account/profile",async(q,r)=>{
  const user=await getAuthUser(q); if(!user)return r.status(401).json({error:"Not authenticated."});
