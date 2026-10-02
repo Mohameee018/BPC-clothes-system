@@ -950,6 +950,6 @@ app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password
 const port=process.env.PORT||3000;
 app.use((err,q,r,next)=>{if(r.headersSent)return next(err);if(err?.type==="entity.parse.failed"||err?.type==="request.aborted"){if(err.type==="entity.parse.failed")return r.status(400).json({error:"Invalid JSON request body."});return r.status(400).json({error:"Request body was interrupted. Please retry."});}console.error("Unhandled request error:",err?.stack||err);r.status(500).json({error:"Internal server error."})});
 export default app;\n\nlet server=null;\nif(!process.env.VERCEL){\n  server=app.listen(port,()=>console.log("BPC Clothes System listening on "+port));\n}
-function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
+function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");if(!server)return process.exit(0);server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
 process.on("SIGTERM",()=>shutdown("SIGTERM"));
 process.on("SIGINT",()=>shutdown("SIGINT"));
