@@ -949,7 +949,7 @@ app.get("/sitemap.xml",(_q,r)=>{const root=(base||"").replace(/\/$/,"");r.type("
 app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.get("/app",(_q,r)=>r.sendFile(path.join(__dirname,"app.html")));app.get("/store",(_q,r)=>r.sendFile(path.join(__dirname,"store.html")));app.get("/",(_q,r)=>r.sendFile(path.join(__dirname,"index.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"app.html")));
 const port=process.env.PORT||3000;
 app.use((err,q,r,next)=>{if(r.headersSent)return next(err);if(err?.type==="entity.parse.failed"||err?.type==="request.aborted"){if(err.type==="entity.parse.failed")return r.status(400).json({error:"Invalid JSON request body."});return r.status(400).json({error:"Request body was interrupted. Please retry."});}console.error("Unhandled request error:",err?.stack||err);r.status(500).json({error:"Internal server error."})});
-const server=app.listen(port,()=>console.log("BPC Clothes System listening on "+port));
+export default app;\n\nlet server=null;\nif(!process.env.VERCEL){\n  server=app.listen(port,()=>console.log("BPC Clothes System listening on "+port));\n}
 function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
 process.on("SIGTERM",()=>shutdown("SIGTERM"));
 process.on("SIGINT",()=>shutdown("SIGINT"));
