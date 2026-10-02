@@ -102,7 +102,7 @@ function profitChart(rows,title){
  const points=rows.map((r,i)=>x(i)+","+y(r.profit)).join(" "),zero=y(0);
  const labels=rows.map((r,i)=>i===0||i===rows.length-1||rows.length<=8||i%Math.ceil(rows.length/8)===0?'<text x="'+x(i)+'" y="'+(h-12)+'" text-anchor="middle" class="chart-label">'+esc(r.date)+'</text>':"").join("");
  const dots=rows.map((r,i)=>'<circle cx="'+x(i)+'" cy="'+y(r.profit)+'" r="4" class="profit-dot"><title>'+esc(r.date)+' — '+esc(money(r.profit))+'</title></circle>').join("");
- return '<div class="panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="muted" style="color:#2f9e62;font-weight:700">ده جدول الـ Net Profit حسب التاريخ</div></div><span class="muted">Green = profit • Red = loss</span></div><div style="overflow-x:auto"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;min-width:680px;height:330px;display:block"><line x1="'+p+'" y1="'+zero+'" x2="'+(w-p)+'" y2="'+zero+'" class="chart-zero"/><polyline points="'+points+'" fill="none" class="profit-line"/>'+dots+labels+'</svg></div></div>';
+ return '<div class="panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="muted" style="color:#2f9e62;font-weight:700">ده جدول الـ Net Profit حسب التاريخ</div></div><span class="muted">Above zero = profit • Below zero = loss</span></div><div style="overflow-x:auto"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;min-width:680px;height:330px;display:block"><line x1="'+p+'" y1="'+zero+'" x2="'+(w-p)+'" y2="'+zero+'" class="chart-zero"/><polyline points="'+points+'" fill="none" class="profit-line"/>'+dots+labels+'</svg></div></div>';
 }
 function dashboard(c){
  const [summary,data]=await Promise.all([api("/api/system/summary"),loadProfitData()]);
