@@ -3,12 +3,7 @@
   "framework": "express",
   "functions": {
     "server.js": {
-      "includeFiles": [
-        "*.html",
-        "*.css",
-        "*.js",
-        "assets/**"
-      ]
+      "includeFiles": "{*.html,*.css,*.js,assets/**}"
     }
   }
 }
