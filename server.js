@@ -137,7 +137,9 @@ app.post("/api/desktop/orders/return",requireDesktopSync,async(q,r)=>{
    if(msg.includes("ORDER_STOCK_NOT_RESERVED"))return r.status(409).json({error:"Order stock is no longer reserved."});
    return r.status(500).json({error:"Could not process return."});
  }
- r.json({ok:true,processed:result.data===true});
+ const synced=await supabase.from("orders").update({order_status:"cancelled",delivery_status:"Returned",updated_at:new Date().toISOString()}).eq("id",order_id).eq("brand_id",q.tenant.brandId).eq("source","website").select("id,order_status,delivery_status").maybeSingle();
+ if(synced.error||!synced.data)return r.status(500).json({error:"Return processed, but the order status could not be synchronized."});
+ r.json({ok:true,processed:result.data===true,order:synced.data});
 });
 app.post("/api/desktop/orders/status",requireDesktopSync,async(q,r)=>{
  if(!supabase)return r.status(503).json({error:"Supabase is not configured."});
@@ -784,7 +786,26 @@ app.get("/api/system/:table",async(q,r)=>{
   const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).limit(limit);
   const search=String(q.query.search||"").trim();if(search&&["products","customers","warehouses","expenses"].includes(table)){const field=table==="products"?"name":table==="customers"?"name":table==="warehouses"?"name":"description";query=query.ilike(field,"%"+search.replace(/[%_]/g,"") +"%")}
   query=query.order(table==="inventory"?"updated_at":"created_at",{ascending:false});
-  const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});r.json(result.data||[]);
+  const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});
+  if(table==="customers"){
+    const customers=result.data||[], ids=customers.map(x=>x.id);
+    if(!ids.length)return r.json([]);
+    const [ordersResult,returnsResult]=await Promise.all([
+      supabase.from("orders").select("id,customer_id,total_amount,order_status,delivery_status").eq("brand_id",q.brandId).in("customer_id",ids),
+      supabase.from("returns").select("order_id").eq("brand_id",q.brandId).in("customer_id",ids)
+    ]);
+    if(ordersResult.error||returnsResult.error)return r.status(500).json({error:"Could not calculate customer statistics."});
+    const returned=new Set((returnsResult.data||[]).map(x=>String(x.order_id)));
+    const byCustomer=new Map();
+    for(const order of ordersResult.data||[]){
+      const id=String(order.customer_id||"");if(!id)continue;
+      const entry=byCustomer.get(id)||{total_orders:0,total_spent:0};
+      if(!/cancel/i.test(String(order.order_status||""))){entry.total_orders+=1;if(!returned.has(String(order.id)))entry.total_spent+=Number(order.total_amount||0);}
+      byCustomer.set(id,entry);
+    }
+    return r.json(customers.map(customer=>({...customer,...(byCustomer.get(String(customer.id))||{total_orders:0,total_spent:0})})));
+  }
+  r.json(result.data||[]);
 });
 app.post("/api/system/:table",async(q,r)=>{
   const table=String(q.params.table||"");if(!SYSTEM_WRITE_TABLES.has(table))return r.status(405).json({error:"This resource is not writable here."});
@@ -810,8 +831,8 @@ app.post("/api/system/:table",async(q,r)=>{
     if(!wh.data){const nw=await supabase.from("warehouses").insert({brand_id:q.brandId,name:"Main Warehouse",location:"",active:true}).select("id").single();if(nw.error)return r.status(500).json({error:"Variant created but warehouse could not be created."});wh={data:nw.data};}
     const inv=await supabase.from("inventory").insert({brand_id:q.brandId,product_id:row.product_id,variant_id:ins.data.id,warehouse_id:wh.data.id,quantity:Number(ins.data.stock||0)});
     if(inv.error){await supabase.from("product_variants").delete().eq("id",ins.data.id).eq("brand_id",q.brandId);return r.status(500).json({error:"Could not initialize variant inventory."});}
-    const base=await supabase.from("inventory").update({quantity:0,updated_at:new Date().toISOString()}).eq("brand_id",q.brandId).eq("product_id",row.product_id).is("variant_id",null);
-    if(base.error)return r.status(500).json({error:"Variant inventory created but base stock could not be reconciled."});
+    const base=await supabase.from("inventory").delete().eq("brand_id",q.brandId).eq("product_id",row.product_id).is("variant_id",null);
+    if(base.error)return r.status(500).json({error:"Variant inventory created but base inventory could not be reconciled."});
     const all=await supabase.from("product_variants").select("stock").eq("brand_id",q.brandId).eq("product_id",row.product_id).eq("active",true);
     if(all.error)return r.status(500).json({error:"Could not calculate product stock."});
     const total=(all.data||[]).reduce((n,x)=>n+Number(x.stock||0),0);
