@@ -5,7 +5,7 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "start": "node store-server.js",
+    "start": "node index.js",
     "desktop": "electron .",
     "dist": "electron-builder --win nsis"
   },
