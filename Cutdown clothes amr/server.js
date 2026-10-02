@@ -326,7 +326,13 @@ app.post("/api/orders",rateLimit({windowMs:5*60*1000,max:10,keyPrefix:"orders"})
 app.get("/reset-password",(_q,r)=>r.sendFile(path.join(__dirname,"reset-password.html")));app.get("/account",(_q,r)=>r.sendFile(path.join(__dirname,"account.html")));app.get("/admin",(_q,r)=>r.sendFile(path.join(__dirname,"admin.html")));app.use((_q,r)=>r.sendFile(path.join(__dirname,"index.html")));
 const port=process.env.PORT||3000;
 app.use((err,q,r,next)=>{console.error("Unhandled request error:",err?.stack||err);if(r.headersSent)return next(err);r.status(500).json({error:"Internal server error."})});
-const server=app.listen(port,()=>console.log("Cutdown Store listening on "+port));
-function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
+
+export default app;
+
+let server=null;
+if(!process.env.VERCEL){
+  server=app.listen(port,()=>console.log("Cutdown Store listening on "+port));
+}
+function shutdown(signal){console.log("Received "+signal+", shutting down gracefully.");if(!server)return process.exit(0);server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),10000).unref();}
 process.on("SIGTERM",()=>shutdown("SIGTERM"));
 process.on("SIGINT",()=>shutdown("SIGINT"));
