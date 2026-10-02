@@ -346,7 +346,7 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
 });
 async function ensureSubscriberWorkspace(user,profile){
  if(!supabase||!user?.id||!profile?.brand_id||isSuperAdminUser(user))return profile;
- const configured=String(configuredBrandId());
+ const configured=platformBrandId();
  const sub=await getSubscriptionForUser(user.id);
  if(!sub||String(sub.brand_id)!==configured||String(profile.brand_id)!==configured)return profile;
  const name=String(profile.name||user.user_metadata?.name||"Store").trim()||"Store";
@@ -364,13 +364,14 @@ function isSuperAdminUser(user){
  const expected=String((process.env.BPC_SUPER_ADMIN_EMAIL||process.env.CUTDOWN_SUPER_ADMIN_EMAIL)||"").trim().toLowerCase();
  return !!expected&&String(user?.email||"").toLowerCase()===expected;
 }
-async function getPlatformPaymentSettings(){
+function platformBrandId(){return String(process.env.BPC_PLATFORM_BRAND_ID||"").trim();}
+ async function getPlatformPaymentSettings(){
  const fallback={
   instapayAddress:String(process.env.BPC_INSTAPAY_ADDRESS||"").trim(),instapayName:String(process.env.BPC_INSTAPAY_NAME||"").trim(),instapayBank:String(process.env.BPC_INSTAPAY_BANK||"").trim(),instapayAccount:String(process.env.BPC_INSTAPAY_ACCOUNT||"").trim(),
   vodafoneCashNumber:String(process.env.BPC_VODAFONE_CASH_NUMBER||"").trim(),vodafoneCashName:String(process.env.BPC_VODAFONE_CASH_NAME||"").trim()
  };
  if(!supabase)return fallback;
- const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ const row=await supabase.from("brands").select("settings").eq("id",platformBrandId()).maybeSingle();
  if(row.error||!row.data?.settings?.payment)return fallback;
  const p=row.data.settings.payment||{};
  return {...fallback,instapayAddress:String(p.instapayAddress??fallback.instapayAddress).trim(),instapayName:String(p.instapayName??fallback.instapayName).trim(),instapayBank:String(p.instapayBank??fallback.instapayBank).trim(),instapayAccount:String(p.instapayAccount??fallback.instapayAccount).trim(),vodafoneCashNumber:String(p.vodafoneCashNumber??fallback.vodafoneCashNumber).trim(),vodafoneCashName:String(p.vodafoneCashName??fallback.vodafoneCashName).trim()};
@@ -390,10 +391,10 @@ app.patch("/api/admin/payment-settings",async(q,r)=>{
  const clean={...current};
  for(const key of ["instapayAddress","instapayName","instapayBank","instapayAccount","vodafoneCashNumber","vodafoneCashName"]){if(Object.prototype.hasOwnProperty.call(q.body||{},key))clean[key]=String(q.body[key]||"").trim().slice(0,160)}
  if(clean.vodafoneCashNumber&&!/^[0-9+\\s-]{8,25}$/.test(clean.vodafoneCashNumber))return r.status(400).json({error:"Invalid Vodafone Cash number."});
- const row=await supabase.from("brands").select("settings").eq("id",configuredBrandId()).maybeSingle();
+ const row=await supabase.from("brands").select("settings").eq("id",platformBrandId()).maybeSingle();
  if(row.error||!row.data)return r.status(404).json({error:"BPC owner brand was not found."});
  const settings={...(row.data.settings||{}),payment:clean};
- const up=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",configuredBrandId()).select("settings").single();
+ const up=await supabase.from("brands").update({settings,updated_at:new Date().toISOString()}).eq("id",platformBrandId()).select("settings").single();
  if(up.error)return r.status(500).json({error:"Could not save payment settings."});
  r.json(clean);
 });
@@ -464,7 +465,7 @@ app.post("/api/admin/customers/reset-password",async(q,r)=>{
 });
 app.post("/api/admin/subscriptions/create",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
- const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
+ const brandId=String(q.body?.brand_id||"").trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),paymentMethod=String(q.body?.payment_method||"manual").trim().toLowerCase(),amount=Number(q.body?.amount||0);
   if(!["manual","instapay","vodafone_cash"].includes(paymentMethod))return r.status(400).json({error:"Supported payment methods are manual, InstaPay and Vodafone Cash."});
  if(!email||!name)return r.status(400).json({error:"Customer name and email are required."});
  const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
@@ -485,7 +486,7 @@ app.post("/api/admin/subscriptions/create",async(q,r)=>{
 });
 app.post("/api/admin/subscriptions/activation",async(q,r)=>{
  const gate=await requireSuperAdmin(q,r);if(!gate.ok)return gate.response;
- const brandId=String(q.body?.brand_id||configuredBrandId()).trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),amount=Number(q.body?.amount||0);
+ const brandId=String(q.body?.brand_id||"").trim(),email=String(q.body?.email||"").trim().toLowerCase(),name=String(q.body?.name||"").trim(),planCode=String(q.body?.plan_code||"monthly").trim(),amount=Number(q.body?.amount||0);
  const plan=await supabase.from("subscription_plans").select("id,code,name,duration_days,price").eq("code",planCode).eq("active",true).maybeSingle();
  if(plan.error||!plan.data||!email||!name)return r.status(400).json({error:"Valid name, email and plan are required."});
  const code=makeActivationCode(),now=new Date(),activationExpires=addDays(now,7);
