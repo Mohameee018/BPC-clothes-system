@@ -1,0 +1,701 @@
+-- Cutdown shared Supabase schema
+-- Phase 1: canonical shared data model for Website + Java Swing Desktop.
+-- Safe to run after supabase.sql and supabase_payment_events.sql.
+-- Existing columns are preserved for compatibility; desktop_* columns are
+-- stable mapping keys while the migration is in progress.
+
+create extension if not exists pgcrypto;
+
+-- =========================================================
+-- PRODUCTS
+-- =========================================================
+alter table products add column if not exists desktop_id text;
+alter table products add column if not exists sku text;
+alter table products add column if not exists cost_price numeric(10,2) not null default 0;
+alter table products add column if not exists minimum_stock integer not null default 0;
+alter table products add column if not exists is_active boolean not null default true;
+alter table products add column if not exists updated_at timestamptz not null default now();
+
+create unique index if not exists ux_products_desktop_id
+    on products(desktop_id) where desktop_id is not null;
+
+create index if not exists ix_products_active_created
+    on products(active, created_at desc);
+
+-- =========================================================
+-- PRODUCT VARIANTS
+-- =========================================================
+create table if not exists product_variants (
+    id uuid primary key default gen_random_uuid(),
+    desktop_variant_id text unique,
+    product_id uuid not null references products(id) on delete cascade,
+    sku text,
+    size text,
+    color text,
+    stock integer not null default 0 check (stock >= 0),
+    active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique(product_id, size, color)
+);
+
+create index if not exists ix_product_variants_product
+    on product_variants(product_id);
+
+-- =========================================================
+-- PRODUCT IMAGES / SUPABASE STORAGE
+-- =========================================================
+create table if not exists product_images (
+    id uuid primary key default gen_random_uuid(),
+    product_id uuid not null references products(id) on delete cascade,
+    storage_path text not null,
+    public_url text,
+    alt_text text default '',
+    sort_order integer not null default 0,
+    is_primary boolean not null default false,
+    color text,
+    created_at timestamptz not null default now()
+);
+alter table product_images add column if not exists color text;
+create index if not exists ix_product_images_product_color on product_images(product_id,color,sort_order);
+
+create index if not exists ix_product_images_product
+    on product_images(product_id, sort_order);
+
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do nothing;
+
+-- =========================================================
+-- WAREHOUSES + INVENTORY
+-- =========================================================
+create table if not exists warehouses (
+    id uuid primary key default gen_random_uuid(),
+    desktop_id text unique,
+    name text not null,
+    location text default '',
+    active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists inventory (
+    id uuid primary key default gen_random_uuid(),
+    product_id uuid not null references products(id) on delete cascade,
+    variant_id uuid references product_variants(id) on delete cascade,
+    warehouse_id uuid not null references warehouses(id) on delete cascade,
+    quantity integer not null default 0 check (quantity >= 0),
+    updated_at timestamptz not null default now(),
+    unique(product_id, variant_id, warehouse_id)
+);
+
+create index if not exists ix_inventory_product
+    on inventory(product_id);
+
+create index if not exists ix_inventory_variant
+    on inventory(variant_id);
+
+create index if not exists ix_inventory_warehouse
+    on inventory(warehouse_id);
+
+-- =========================================================
+-- CUSTOMERS / WEBSITE ACCOUNTS
+-- =========================================================
+create table if not exists customers (
+    id uuid primary key default gen_random_uuid(),
+    auth_user_id uuid unique references auth.users(id) on delete set null,
+    desktop_id text unique,
+    name text not null,
+    email text,
+    phone text,
+    additional_phone text,
+    city text,
+    address text,
+    total_orders integer not null default 0,
+    total_spent numeric(12,2) not null default 0,
+    last_order_at timestamptz,
+    status text not null default 'Active',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create unique index if not exists ux_customers_phone
+    on customers(phone) where phone is not null and phone <> '';
+
+create index if not exists ix_customers_auth_user
+    on customers(auth_user_id);
+
+-- =========================================================
+-- ORDERS
+-- =========================================================
+alter table orders add column if not exists desktop_id text;
+alter table orders add column if not exists customer_id uuid references customers(id) on delete set null;
+alter table orders add column if not exists source text not null default 'website';
+alter table orders add column if not exists shipping_amount numeric(10,2) not null default 0;
+alter table orders add column if not exists updated_at timestamptz not null default now();
+alter table orders add column if not exists stock_reserved boolean not null default false;
+
+create unique index if not exists ux_orders_desktop_id
+    on orders(desktop_id) where desktop_id is not null;
+
+create index if not exists ix_orders_customer
+    on orders(customer_id);
+
+create index if not exists ix_orders_created
+    on orders(created_at desc);
+
+-- =========================================================
+-- ORDER ITEMS
+-- =========================================================
+alter table order_items add column if not exists variant_id uuid references product_variants(id) on delete set null;
+alter table order_items add column if not exists desktop_id text;
+
+create unique index if not exists ux_order_items_desktop_id
+    on order_items(desktop_id) where desktop_id is not null;
+
+create index if not exists ix_order_items_variant
+    on order_items(variant_id);
+
+-- =========================================================
+-- RETURNS — WHOLE ORDER ONLY
+-- =========================================================
+create table if not exists returns (
+    id uuid primary key default gen_random_uuid(),
+    desktop_id text unique,
+    order_id uuid references orders(id) on delete set null,
+    customer_id uuid references customers(id) on delete set null,
+    return_type text not null default 'whole_order'
+        check (return_type = 'whole_order'),
+    reason text,
+    disposition text not null
+        check (disposition in ('Return to Stock', 'Scrap / Damaged')),
+    refund_amount numeric(12,2) not null default 0,
+    loss numeric(12,2) not null default 0,
+    created_at timestamptz not null default now(),
+    processed_at timestamptz,
+    notes text
+);
+
+create index if not exists ix_returns_order
+    on returns(order_id);
+
+-- =========================================================
+-- UPDATED_AT HELPER
+-- =========================================================
+create or replace function set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+    new.updated_at = now();
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_products_updated_at on products;
+create trigger trg_products_updated_at
+before update on products
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_product_variants_updated_at on product_variants;
+create trigger trg_product_variants_updated_at
+before update on product_variants
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_warehouses_updated_at on warehouses;
+create trigger trg_warehouses_updated_at
+before update on warehouses
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_inventory_updated_at on inventory;
+create trigger trg_inventory_updated_at
+before update on inventory
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_customers_updated_at on customers;
+create trigger trg_customers_updated_at
+before update on customers
+for each row execute function set_updated_at();
+
+drop trigger if exists trg_orders_updated_at on orders;
+create trigger trg_orders_updated_at
+before update on orders
+for each row execute function set_updated_at();
+
+-- =========================================================
+-- STOCK-SAFE WHOLE-ORDER RETURN
+-- =========================================================
+-- This function is intentionally narrow: it is for the new whole-order
+-- return workflow only. Detailed integration code will call it after the
+-- desktop/API layer is connected.
+create or replace function restore_whole_order_stock(p_order_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    item_row record;
+begin
+    for item_row in
+        select oi.product_id, oi.variant_id, oi.quantity
+        from order_items oi
+        where oi.order_id = p_order_id
+    loop
+        if item_row.variant_id is not null then
+            update product_variants
+            set stock = stock + item_row.quantity,
+                updated_at = now()
+            where id = item_row.variant_id;
+
+            update inventory
+            set quantity = quantity + item_row.quantity,
+                updated_at = now()
+            where variant_id = item_row.variant_id;
+        else
+            update products
+            set stock = stock + item_row.quantity,
+                updated_at = now()
+            where id = item_row.product_id;
+        end if;
+    end loop;
+end;
+$$;
+
+-- =========================================================
+-- RLS
+-- =========================================================
+alter table product_variants enable row level security;
+alter table product_images enable row level security;
+alter table warehouses enable row level security;
+alter table inventory enable row level security;
+alter table customers enable row level security;
+alter table returns enable row level security;
+
+-- Public storefront reads only active catalog data.
+drop policy if exists "public read active product variants" on product_variants;
+create policy "public read active product variants"
+on product_variants for select
+using (
+    active = true
+    and exists (
+        select 1 from products p
+        where p.id = product_variants.product_id
+          and p.active = true
+          and p.is_active = true
+    )
+);
+
+drop policy if exists "public read product images" on product_images;
+create policy "public read product images"
+on product_images for select
+using (
+    exists (
+        select 1 from products p
+        where p.id = product_images.product_id
+          and p.active = true
+          and p.is_active = true
+    )
+);
+
+-- Customers can only read/update their own website profile.
+drop policy if exists "customer read own profile" on customers;
+create policy "customer read own profile"
+on customers for select
+to authenticated
+using (auth_user_id = auth.uid());
+
+drop policy if exists "customer update own profile" on customers;
+create policy "customer update own profile"
+on customers for update
+to authenticated
+using (auth_user_id = auth.uid())
+with check (auth_user_id = auth.uid());
+
+-- Customer order visibility will be added with the authenticated website
+-- account flow. Desktop/admin access is intentionally not granted through
+-- the public anon key; it will go through the protected server/API layer.
+
+-- =========================================================
+-- MIGRATION SAFETY NOTES
+-- =========================================================
+-- 1. Do not delete the existing products.stock/active columns yet.
+-- 2. Do not drop SQLite or old website columns until the migration tests pass.
+-- 3. desktop_id is the stable bridge for existing Java Swing records.
+-- 4. Website IDs remain UUIDs; desktop IDs remain PRD-/ORD-/RET- style.
+-- 5. Service-role credentials stay server-side only.
+
+
+-- =========================================================
+-- WEBSITE ACCOUNT / ORDER LINKING (next integration step)
+-- =========================================================
+-- A customer account is represented by Supabase Auth + one profile row.
+-- Orders may be created by a signed-in customer or by guest checkout.
+create index if not exists ix_orders_customer_created
+    on orders(customer_id, created_at desc)
+    where customer_id is not null;
+
+-- A product is considered sold out from inventory, while active=false is
+-- reserved for deliberately hidden products. This keeps "SOLD OUT" visible
+-- on the storefront instead of silently hiding an exhausted product.
+create or replace function product_is_sold_out(p_product_id uuid)
+returns boolean
+language sql
+stable
+as $$
+    select coalesce((
+        select stock <= 0 from products where id = p_product_id
+    ), true);
+$$;
+
+
+-- =========================================================
+-- ATOMIC VARIANT STOCK RESERVATION
+-- =========================================================
+create or replace function reserve_variant_stock(p_items jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare item_row jsonb; v_id uuid; qty integer; current_stock integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := (item_row->>'variant_id')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    select stock into current_stock from product_variants where id=v_id and active=true for update;
+    if not found or current_stock < qty then
+      raise exception 'INSUFFICIENT_VARIANT_STOCK:%',v_id using errcode='P0001';
+    end if;
+    update product_variants set stock=stock-qty, updated_at=now() where id=v_id;
+  end loop;
+end;
+$$;
+
+create or replace function release_variant_stock(p_items jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare item_row jsonb; v_id uuid; qty integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := (item_row->>'variant_id')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    update product_variants set stock=stock+qty, updated_at=now() where id=v_id;
+  end loop;
+end;
+$$;
+
+
+-- Website/Desktop customer and order linkage migration
+alter table customers add column if not exists email text;
+alter table customers add column if not exists city text;
+alter table customers add column if not exists address text;
+alter table customers add column if not exists updated_at timestamptz not null default now();
+alter table orders add column if not exists customer_id uuid references customers(id) on delete set null;
+alter table orders add column if not exists source text not null default 'desktop';
+create index if not exists idx_orders_customer_id on orders(customer_id);
+create index if not exists idx_orders_source on orders(source);
+
+
+-- =========================================================
+-- ATOMIC WHOLE-ORDER RETURN
+-- =========================================================
+create or replace function process_whole_order_return(
+    p_order_id uuid,
+    p_reason text,
+    p_disposition text,
+    p_refund_amount numeric,
+    p_loss numeric
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    order_row record;
+    item_row record;
+begin
+    select id, customer_id, source, order_status, payment_status, stock_reserved, total_amount
+      into order_row
+      from orders
+     where id = p_order_id
+       and source = 'website'
+     for update;
+
+    if not found then
+        raise exception 'WEBSITE_ORDER_NOT_FOUND';
+    end if;
+
+    if not (coalesce(order_row.order_status, '') = 'confirmed'
+            or coalesce(order_row.payment_status, '') = 'paid') then
+        raise exception 'ORDER_NOT_CONFIRMED';
+    end if;
+
+    if not coalesce(order_row.stock_reserved, false) then
+        raise exception 'ORDER_STOCK_NOT_RESERVED';
+    end if;
+
+    -- One canonical return transaction per website order.
+    if exists (select 1 from returns where order_id = p_order_id) then
+        return false;
+    end if;
+
+    if p_disposition not in ('Return to Stock', 'Scrap / Damaged') then
+        raise exception 'INVALID_RETURN_DISPOSITION';
+    end if;
+
+    if coalesce(p_refund_amount, 0) < 0
+       or coalesce(p_refund_amount, 0) > coalesce(order_row.total_amount, 0) then
+        raise exception 'INVALID_REFUND_AMOUNT';
+    end if;
+
+    if coalesce(p_loss, 0) < 0 then
+        raise exception 'INVALID_LOSS_AMOUNT';
+    end if;
+
+    if p_disposition = 'Return to Stock' then
+        for item_row in
+            select variant_id, product_id, quantity
+              from order_items
+             where order_id = p_order_id
+        loop
+            if item_row.variant_id is not null then
+                update product_variants
+                   set stock = stock + item_row.quantity,
+                       updated_at = now()
+                 where id = item_row.variant_id;
+
+                update inventory
+                   set quantity = quantity + item_row.quantity,
+                       updated_at = now()
+                 where variant_id = item_row.variant_id;
+            else
+                update products
+                   set stock = stock + item_row.quantity
+                 where id = item_row.product_id;
+            end if;
+        end loop;
+    end if;
+
+    insert into returns (
+        desktop_id, order_id, customer_id, return_type,
+        reason, disposition, refund_amount, loss, processed_at
+    )
+    values (
+        'website-return:' || p_order_id::text,
+        p_order_id,
+        order_row.customer_id,
+        'whole_order',
+        coalesce(p_reason, ''),
+        p_disposition,
+        greatest(0, coalesce(p_refund_amount, 0)),
+        greatest(0, coalesce(p_loss, 0)),
+        now()
+    );
+
+    update orders
+       set delivery_status = 'Returned',
+           order_status = 'Not Prepared',
+           stock_reserved = false,
+           updated_at = now()
+     where id = p_order_id;
+
+    return true;
+end;
+$$;
+
+-- =========================================================
+-- AUTH / CUSTOMER ACCOUNT INTEGRATION
+-- =========================================================
+create table if not exists public.profiles (
+    id uuid primary key references auth.users(id) on delete cascade,
+    role text not null default 'customer' check (role in ('customer','admin')),
+    name text,
+    phone text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    insert into public.profiles(id,name,phone)
+    values(new.id,new.raw_user_meta_data->>'name',new.raw_user_meta_data->>'phone')
+    on conflict (id) do nothing;
+    return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+after insert on auth.users
+for each row execute function public.handle_new_user();
+revoke all on function public.handle_new_user() from public, anon, authenticated;
+
+create schema if not exists private;
+
+create or replace function private.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select exists(
+        select 1 from public.profiles
+        where id=(select auth.uid()) and role='admin'
+    );
+$$;
+revoke all on function private.is_admin() from public;
+grant execute on function private.is_admin() to authenticated;
+
+drop policy if exists "profiles own or admin select" on public.profiles;
+create policy "profiles own or admin select"
+on public.profiles for select to authenticated
+using ((select auth.uid())=id or private.is_admin());
+
+drop policy if exists "profiles own update" on public.profiles;
+create policy "profiles own update"
+on public.profiles for update to authenticated
+using ((select auth.uid())=id)
+with check ((select auth.uid())=id);
+
+alter table public.customers add column if not exists auth_user_id uuid references auth.users(id) on delete set null;
+create unique index if not exists idx_customers_auth_user_id
+on public.customers(auth_user_id) where auth_user_id is not null;
+
+create or replace function public.link_customer_to_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+    if new.email is not null then
+        update public.customers
+        set auth_user_id=new.id, updated_at=now()
+        where auth_user_id is null and lower(email)=lower(new.email);
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_link_customer on auth.users;
+create trigger on_auth_user_link_customer
+after insert on auth.users
+for each row execute function public.link_customer_to_auth_user();
+revoke all on function public.link_customer_to_auth_user() from public, anon, authenticated;
+
+create or replace function public.claim_customer_for_auth()
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare cid uuid;
+begin
+    select id into cid from public.customers
+    where auth_user_id=(select auth.uid()) limit 1;
+    if cid is not null then return cid; end if;
+
+    update public.customers
+    set auth_user_id=(select auth.uid()), updated_at=now()
+    where id=(
+        select id from public.customers
+        where auth_user_id is null and email is not null
+          and lower(email)=lower((select email from auth.users where id=(select auth.uid())))
+        order by created_at limit 1
+    )
+    returning id into cid;
+    return cid;
+end;
+$$;
+revoke all on function public.claim_customer_for_auth() from public, anon;
+grant execute on function public.claim_customer_for_auth() to authenticated;
+
+drop policy if exists "customer read own profile" on public.customers;
+create policy "customer read own profile"
+on public.customers for select to authenticated
+using (auth_user_id=(select auth.uid()) or private.is_admin());
+
+drop policy if exists "customer update own profile" on public.customers;
+create policy "customer update own profile"
+on public.customers for update to authenticated
+using (auth_user_id=(select auth.uid()) or private.is_admin())
+with check (auth_user_id=(select auth.uid()) or private.is_admin());
+
+drop policy if exists "customer read own orders" on public.orders;
+create policy "customer read own orders"
+on public.orders for select to authenticated
+using (
+    customer_id in (select id from public.customers where auth_user_id=(select auth.uid()))
+    or private.is_admin()
+);
+
+drop policy if exists "customer read own order items" on public.order_items;
+create policy "customer read own order items"
+on public.order_items for select to authenticated
+using (
+    order_id in (
+        select id from public.orders
+        where customer_id in (select id from public.customers where auth_user_id=(select auth.uid()))
+    )
+    or private.is_admin()
+);
+
+-- Delivery state used by both the website admin and Java desktop.
+alter table orders add column if not exists delivery_status text not null default 'Pending';
+create index if not exists idx_orders_delivery_status on orders(delivery_status);
+
+
+-- =========================================================
+-- ATOMIC STOCK RESERVATION FOR WEBSITE ORDERS (VARIANT + PRODUCT)
+-- =========================================================
+create or replace function public.reserve_stock_items(p_items jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare item_row jsonb; v_id uuid; p_id uuid; qty integer; current_stock integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := nullif(item_row->>'variant_id','')::uuid;
+    p_id := nullif(item_row->>'product_id','')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    if v_id is not null then
+      select stock into current_stock from product_variants where id=v_id and product_id=p_id and active=true for update;
+      if not found or current_stock < qty then raise exception 'INSUFFICIENT_VARIANT_STOCK:%',v_id using errcode='P0001'; end if;
+      update product_variants set stock=stock-qty, updated_at=now() where id=v_id;
+    elsif p_id is not null then
+      select stock into current_stock from products where id=p_id and active=true for update;
+      if not found or current_stock < qty then raise exception 'INSUFFICIENT_PRODUCT_STOCK:%',p_id using errcode='P0001'; end if;
+      update products set stock=stock-qty where id=p_id;
+    else
+      raise exception 'INVALID_STOCK_ITEM' using errcode='P0001';
+    end if;
+  end loop;
+end; $$;
+
+create or replace function public.release_stock_items(p_items jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare item_row jsonb; v_id uuid; p_id uuid; qty integer;
+begin
+  for item_row in select * from jsonb_array_elements(coalesce(p_items,'[]'::jsonb)) loop
+    v_id := nullif(item_row->>'variant_id','')::uuid;
+    p_id := nullif(item_row->>'product_id','')::uuid;
+    qty := greatest(1,(item_row->>'quantity')::integer);
+    if v_id is not null then update product_variants set stock=stock+qty, updated_at=now() where id=v_id;
+    elsif p_id is not null then update products set stock=stock+qty where id=p_id;
+    end if;
+  end loop;
+end; $$;
+
+revoke all on function public.reserve_stock_items(jsonb) from public, anon, authenticated;
+revoke all on function public.release_stock_items(jsonb) from public, anon, authenticated;
