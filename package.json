@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
-    "express": "^5.1.0",
-    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.2",
     "compression": "^1.8.2"
   },
   "devDependencies": {
-    "electron": "^38.0.0",
-    "electron-builder": "^26.0.12"
+    "electron": "^38.8.6",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.bpc.clothes",
