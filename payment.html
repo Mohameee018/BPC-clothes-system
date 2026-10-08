@@ -1,52 +1,83 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BPC Clothes System — الدفع</title><link rel="stylesheet" href="style.css">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BPC Clothes System — التحقق من الاشتراك</title>
+<link rel="stylesheet" href="style.css">
 <style>
 body{margin:0;background:#061b10;color:#f7fbf8;font-family:"Readex Pro",Arial,sans-serif;min-height:100vh}
 .wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 25% 20%,rgba(57,201,121,.18),transparent 35%),radial-gradient(circle at 80% 80%,rgba(142,233,177,.1),transparent 30%)}
 .card{width:min(620px,100%);padding:34px;border:1px solid rgba(190,255,214,.16);border-radius:28px;background:rgba(8,43,25,.72);backdrop-filter:blur(24px);box-shadow:0 28px 90px rgba(0,0,0,.25)}
-.eyebrow{color:#8ee9b1;letter-spacing:.15em;font-size:11px}.price{font-size:42px;font-weight:700;margin:18px 0 4px}.muted{color:rgba(247,251,248,.64);line-height:1.8}.status{margin:20px 0;padding:14px;border-radius:14px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15);color:#f6d98a}
-.actions{display:grid;gap:10px;margin-top:20px}button,a.btn{border:0;border-radius:14px;padding:14px 16px;text-align:center;font-weight:700;cursor:pointer;text-decoration:none;font-size:14px}
-.primary{background:#39c979;color:#062617}.secondary{background:rgba(255,255,255,.08);color:#f7fbf8;border:1px solid rgba(255,255,255,.1)!important}
+.eyebrow{color:#8ee9b1;letter-spacing:.15em;font-size:11px}.price{font-size:42px;font-weight:700;margin:18px 0 4px}.muted{color:rgba(247,251,248,.72);line-height:1.9}
+.status{margin:20px 0 12px;padding:16px;border-radius:14px;background:rgba(246,217,138,.08);border:1px solid rgba(246,217,138,.15);color:#f6d98a;line-height:1.8}
+.actions{display:grid;gap:10px;margin-top:18px}button,a.btn{border:0;border-radius:14px;padding:14px 16px;text-align:center;font-weight:700;cursor:pointer;text-decoration:none;font-size:14px}
+.primary{background:#39c979;color:#062617}.secondary{background:rgba(255,255,255,.08);color:#f7fbf8;border:1px solid rgba(255,255,255,.1)!important}.contact{background:#8ee9b1;color:#062617}
 .details{display:none;margin-top:18px;padding:18px;border-radius:16px;background:rgba(255,255,255,.045);border:1px solid rgba(142,233,177,.14)}
 .row{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px}.row:last-child{border-bottom:0}.row b{color:#8ee9b1}
-.note{font-size:12px;color:rgba(247,251,248,.7);line-height:1.8;margin-top:14px}
+.note{font-size:12px;color:rgba(247,251,248,.7);line-height:1.9;margin-top:14px}
+@media(max-width:520px){.card{padding:24px}.price{font-size:34px}}
 </style></head>
 <body><main class="wrap"><section class="card">
-<div class="eyebrow">BPC CLOTHES SYSTEM · PAYMENT</div>
-<h1 id="title">دفع الاشتراك</h1><p id="copy" class="muted">جارٍ تحميل بيانات الباقة…</p>
-<div id="price" class="price">—</div><div id="status" class="status">جاري التحقق من الاشتراك…</div>
-<div id="details" class="details"></div><div id="actions" class="actions"></div><div id="msg" class="note"></div>
+<div class="eyebrow">BPC CLOTHES SYSTEM · SUBSCRIPTION</div>
+<h1 id="title">جاري التحقق من الاشتراك…</h1>
+<p id="copy" class="muted">بعد ما تتأكد من تحويل مبلغ الاشتراك، تواصل معانا من الزرار اللي تحت. هنراجع الدفع ونفعّل حسابك.</p>
+<div id="price" class="price">—</div>
+<div id="status" class="status" role="status" aria-live="polite">جاري التحقق من الاشتراك…</div>
+<div id="details" class="details"></div>
+<div id="actions" class="actions">
+<a class="btn contact" href="https://wa.me/201080910753?text=السلام%20عليكم،%20أنا%20اشتركت%20في%20BPC%20Clothes%20System%20ومحتاج%20تأكيد%20الدفع%20وتفعيل%20الحساب." target="_blank" rel="noopener noreferrer">تواصل لتأكيد الدفع على 01080910753</a>
+</div>
+<div id="msg" class="note">هنراجع حالة الاشتراك تلقائيًا. أول ما يتفعل من لوحة الإدارة، هنحوّلك للسيستم تلقائيًا. ما تقفلش الصفحة لو عايز التحويل يحصل لوحده.</div>
 </section></main>
 <script>
-const token=sessionStorage.getItem("bpc_signup_token");const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
-const statusEl=document.querySelector("#status"),details=document.querySelector("#details"),actions=document.querySelector("#actions"),price=document.querySelector("#price"),copy=document.querySelector("#copy"),msg=document.querySelector("#msg");
+const token=sessionStorage.getItem("bpc_signup_token");
+const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const statusEl=document.querySelector("#status"),details=document.querySelector("#details"),actions=document.querySelector("#actions"),price=document.querySelector("#price"),copy=document.querySelector("#copy"),msg=document.querySelector("#msg"),title=document.querySelector("#title");
+let polling=false,redirecting=false,lastStatus="";
+function supportButton(){
+ return '<a class="btn contact" href="https://wa.me/201080910753?text=السلام%20عليكم،%20أنا%20اشتركت%20في%20BPC%20Clothes%20System%20ومحتاج%20تأكيد%20الدفع%20وتفعيل%20الحساب." target="_blank" rel="noopener noreferrer">تواصل لتأكيد الدفع على 01080910753</a>';
+}
 function showManual(s){
- const isI=s.payment_method==="instapay";
- const p=s.plan||{}; price.textContent=Number(p.price||0).toLocaleString("ar-EG")+" جنيه";
- copy.innerHTML="الباقة: <b>"+esc(p.name||"")+"</b><br>المبلغ المطلوب: <b>"+Number(p.price||0).toLocaleString("ar-EG")+" جنيه مصري</b>";
- statusEl.textContent="بعد الدفع، برجاء التواصل مع الدعم لتأكيد الدفع وتفعيل الحساب.";
- details.style.display="block";details.innerHTML=isI?
- '<div class="row"><span>حساب InstaPay</span><b>'+esc(s.payment?.address||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>':
- '<div class="row"><span>Vodafone Cash</span><b>'+esc(s.payment?.number||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>';
- actions.innerHTML=isI
-   ? '<a class="btn primary" id="pay" href="https://ipn.eg/S/mohame1131/instapay/4kO7KH" target="_blank" rel="noopener">الذهاب للدفع الآن ←</a><a class="btn secondary" href="/plans.html">تغيير الباقة</a>'
-   : '<button class="primary" id="pay" type="button">الدفع عبر Vodafone Cash</button><a class="btn secondary" href="/plans.html">تغيير الباقة</a>';
- if(!isI){
-   document.querySelector("#pay").onclick=()=>{msg.textContent="للدفع عبر Vodafone Cash، الرجاء التواصل مع الدعم لإتمام عملية الدفع وتفعيل الحساب."};
- } else {
-   msg.textContent="بعد إتمام الدفع عبر InstaPay، برجاء التواصل مع الدعم لتأكيد الدفع وتفعيل الحساب.";
- }
+ const isI=s.payment_method==="instapay",p=s.plan||{};
+ price.textContent=Number(p.price||0).toLocaleString("ar-EG")+" جنيه";
+ copy.innerHTML="الباقة: <b>"+esc(p.name||"")+"</b><br>المبلغ المطلوب: <b>"+Number(p.price||0).toLocaleString("ar-EG")+" جنيه مصري</b><br>بعد التحويل، اضغط زر التواصل وأرسل إثبات الدفع.";
+ statusEl.textContent="جاري التحقق من الاشتراك… بعد ما تبعت إثبات الدفع، هنراجع التحويل ونفعّل حسابك.";
+ details.style.display="block";
+ details.innerHTML=isI
+  ? '<div class="row"><span>طريقة الدفع</span><b>InstaPay</b></div><div class="row"><span>حساب InstaPay</span><b>'+esc(s.payment?.address||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>'
+  : '<div class="row"><span>طريقة الدفع</span><b>Vodafone Cash</b></div><div class="row"><span>رقم فودافون كاش</span><b>'+esc(s.payment?.number||"—")+'</b></div><div class="row"><span>الاسم</span><b>'+esc(s.payment?.name||"—")+'</b></div>';
+ actions.innerHTML=(isI
+  ? '<a class="btn primary" href="https://ipn.eg/S/mohame1131/instapay/4kO7KH" target="_blank" rel="noopener noreferrer">الذهاب للدفع عبر InstaPay ←</a>'
+  : '<a class="btn primary" href="https://wa.me/201080910753?text=السلام%20عليكم،%20عايز%20أتمم%20دفع%20اشتراك%20BPC%20Clothes%20System%20عن%20طريق%20Vodafone%20Cash." target="_blank" rel="noopener noreferrer">إتمام الدفع عبر Vodafone Cash</a>')
+  +supportButton()
+  +'<a class="btn secondary" href="/plans.html">العودة إلى الباقات</a>';
 }
-async function load(){
- if(!token){statusEl.textContent="جلسة الدفع غير موجودة. ارجع وسجل الحساب مرة أخرى.";return}
- const r=await fetch("/api/subscription/status",{headers:{Authorization:"Bearer "+token}}).catch(()=>null);const d=r?await r.json().catch(()=>({})):{}};
- if(!r?.ok){statusEl.textContent=d.error||"تعذر التحقق من الاشتراك.";return}
- const s=d.subscription;
- if(s?.active){statusEl.textContent="تم تفعيل الاشتراك ✓";setTimeout(()=>location.href="/app.html",700);return}
- if(s?.status!=="pending"){statusEl.textContent="حالة الاشتراك: "+(s?.status||"غير معروفة");return}
- showManual(s);
+async function loadStatus(){
+ if(!token){statusEl.textContent="جلسة الدفع غير موجودة. سجّل الدخول أو أنشئ الحساب مرة أخرى، ولو دفعت بالفعل تواصل مع الدعم.";actions.innerHTML=supportButton();return}
+ if(polling||redirecting)return;
+ polling=true;
+ try{
+  const r=await fetch("/api/subscription/status",{headers:{Authorization:"Bearer "+token},cache:"no-store"});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){statusEl.textContent=r.status===401?"انتهت جلسة التحقق. تواصل مع الدعم لمساعدتك في تفعيل الحساب.":(d.error||"تعذر التحقق الآن. سنحاول مرة أخرى تلقائيًا.");actions.innerHTML=supportButton();return}
+  const s=d.subscription||{};
+  if(s.active||s.status==="active"){
+   redirecting=true;title.textContent="تم تفعيل اشتراكك ✓";statusEl.textContent="تم تأكيد الدفع وتفعيل الحساب بنجاح. جاري تحويلك إلى السيستم…";
+   actions.innerHTML="";msg.textContent="";sessionStorage.setItem("bpc_admin_token",token);
+   setTimeout(()=>location.replace("/app.html"),600);return;
+  }
+  if(s.status==="pending"){
+   if(lastStatus!=="pending")showManual(s);
+   lastStatus="pending";
+   return;
+  }
+  statusEl.textContent=s.status==="expired"?"الاشتراك منتهي. تواصل مع الدعم لتجديده.":"حالة الاشتراك: "+(s.status||"بانتظار التحقق");
+  actions.innerHTML=supportButton();
+ }catch{
+  statusEl.textContent="تعذر الاتصال للتحقق من الاشتراك. هنحاول تاني تلقائيًا.";
+ }finally{polling=false}
 }
-load();
+loadStatus();
+setInterval(loadStatus,5000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)loadStatus()});
 </script></body></html>
