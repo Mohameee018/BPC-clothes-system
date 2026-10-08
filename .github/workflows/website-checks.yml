@@ -7,9 +7,6 @@ on:
 jobs:
   syntax:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: Cutdown clothes amr
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,8 +14,10 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check server.js
-      - run: node --check script.js
+      - run: node --check electron/main.cjs
+      - name: Check app JavaScript syntax
+        run: node -e "const fs=require('fs');const s=fs.readFileSync('app.html','utf8').match(/<script>([\s\S]*?)<\/script>/)?.[1];if(!s)throw new Error('app.html script not found');new Function(s);"
 
       - name: Security regression checks
         run: |
-          node -e "const fs=require('fs');for(const f of ['admin.html','account.html']){const s=fs.readFileSync(f,'utf8');if(!s.includes('const esc='))throw new Error(f+' is missing HTML escaping');}const s=fs.readFileSync('server.js','utf8');for(const x of ['rateLimit','X-Content-Type-Options','CORS_ORIGINS','CUTDOWN_DESKTOP_SHA256'])if(!s.includes(x))throw new Error('Missing security control: '+x);"
+          node -e "const fs=require('fs');const app=fs.readFileSync('app.html','utf8');if(!app.includes('const esc='))throw new Error('app.html is missing HTML escaping');const s=fs.readFileSync('server.js','utf8');for(const x of ['rateLimit','X-Content-Type-Options','CORS_ORIGINS','CUTDOWN_DESKTOP_SHA256'])if(!s.includes(x))throw new Error('Missing security control: '+x);"
