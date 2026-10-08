@@ -214,7 +214,7 @@ async function ensureCustomerForUser(user){
   if(linked.error)throw linked.error;
   return linked.data||null;
 }const SUPABASE_PUBLISHABLE_KEY=process.env.SUPABASE_PUBLISHABLE_KEY||"sb_publishable_FG00mgx9-nGbIxCPfSiCHw_CFRHCcc_";
-const authFetch=async(input,init={})=>{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);try{return await fetch(input,{...init,signal:controller.signal})}finally{clearTimeout(timer)}};\nconst authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false},global:{fetch:authFetch}}):null;
+const authClient=process.env.SUPABASE_URL&&SUPABASE_PUBLISHABLE_KEY?createClient(process.env.SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}}):null;
 function hashActivationCode(code){
   return crypto.createHash("sha256").update(String(code||"").trim().toUpperCase()).digest("hex");
 }
@@ -379,7 +379,7 @@ app.post("/api/desktop/auth/login",rateLimit({windowMs:10*60*1000,max:10,keyPref
  if(!authClient||!supabase)return r.status(503).json({error:"Supabase Auth is not configured."});
  const email=String(q.body?.email||"").trim(),password=String(q.body?.password||"");
  if(!email||!password)return r.status(400).json({error:"Email and password are required."});
- let signed;try{signed=await authClient.auth.signInWithPassword({email,password})}catch(e){console.error("Supabase Auth login request failed:",e?.name||"Error",e?.message||"");return r.status(503).json({error:"Supabase Auth is temporarily unavailable. Please try again."})}
+ const signed=await authClient.auth.signInWithPassword({email,password});
  if(signed.error||!signed.data?.session)return r.status(401).json({error:"Invalid email or password."});
  const user=signed.data.user;let profile=await getAuthProfile(user.id);
  if(profile?.role!=="admin"||!profile?.brand_id){await authClient.auth.signOut();return r.status(403).json({error:"This account is not assigned to a BPC company administrator."});}
