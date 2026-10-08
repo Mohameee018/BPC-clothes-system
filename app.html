@@ -13,7 +13,7 @@
 .main{min-width:0}.top{height:70px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:5}.top h1{font:700 22px Oswald;margin:0}.content{padding:28px;max-width:1600px;margin:auto}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.cards.five{grid-template-columns:repeat(5,minmax(0,1fr))}.card,.panel{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}.card{padding:17px}.card .num{font:700 24px Oswald;margin-top:7px}.muted{color:var(--muted)}.toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;margin:0 0 14px;flex-wrap:wrap}.toolbar .left,.toolbar .right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.search{border:1px solid var(--line);background:#fff;border-radius:9px;padding:10px 12px;min-width:280px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:900px}.table th,.table td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle}.table th{font-size:11px;color:#687777;text-transform:uppercase;letter-spacing:.04em;background:#f5f8f7}.table tr:hover td{background:#fbfdfc}.pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;background:#dff2e7;color:#31704b}.pill.warn{background:#fff0d1;color:#8a6119}.pill.bad{background:#f8dfdf;color:#9a4141}.empty{padding:35px;text-align:center;color:var(--muted)}.panel{padding:18px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.modal-back{position:fixed;inset:0;background:#10202080;display:grid;place-items:center;padding:20px;z-index:20}.modal{background:#fff;border-radius:16px;width:min(720px,100%);max-height:92vh;overflow:auto;padding:24px}.modal h2{font:700 22px Oswald;margin:0 0 16px}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}.section-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 12px}.section-title h2{font:700 19px Oswald}.statline{display:flex;gap:8px;flex-wrap:wrap}.thumb{width:48px;height:48px;border-radius:8px;object-fit:cover;background:#eef3f1;border:1px solid var(--line)}.mobile-nav{display:none}
 @media(max-width:1050px){.cards.five{grid-template-columns:repeat(3,1fr)}.cards{grid-template-columns:repeat(2,1fr)}.app{grid-template-columns:210px 1fr}.grid2,.grid3{grid-template-columns:1fr}}
 @media(max-width:720px){.app{grid-template-columns:1fr}.side{display:none}.mobile-nav{display:flex;overflow:auto;background:var(--side);padding:7px;gap:5px;position:sticky;top:70px;z-index:4}.mobile-nav button{white-space:nowrap;background:var(--side2);color:#fff;padding:8px 11px;border-radius:8px;border:0}.content{padding:16px}.cards,.cards.five{grid-template-columns:1fr}.top{padding:0 16px}.search{min-width:0;width:100%}.top-actions{gap:6px!important}.store-link{padding:8px 9px!important;font-size:11px!important}.top-status{display:none!important}}
-.profit-line{stroke:#2f9e62;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.profit-dot{fill:#2f9e62;stroke:#fff;stroke-width:2}.chart-zero{stroke:#b7c8bf;stroke-width:1;stroke-dasharray:5 5}.chart-label{fill:#66756d;font:12px Arial,sans-serif}@media(max-width:700px){.profit-dot{r:3}}</style>
+.profit-line{stroke:var(--primary);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.profit-dot{fill:var(--primary);stroke:#fff;stroke-width:2}.profit-bar{fill:var(--primary);transition:opacity .15s,transform .15s}.profit-bar:hover{opacity:.82}.profit-bar-loss{fill:var(--danger)}.chart-grid{stroke:#e7eeeb;stroke-width:1}.chart-zero{stroke:#aebfba;stroke-width:1.5}.chart-axis-label{fill:#66756d;font:12px Arial,sans-serif}.profit-chart-panel{overflow:hidden}</style>
 </head>
 <body>
 <section id="login" class="login">
@@ -104,12 +104,27 @@ function buildProfitBuckets(data,r){
 }
 function profitChart(rows,title){
  if(!rows.length)return '<div class="panel"><div class="section-title"><h2>'+esc(title)+'</h2></div><div class="empty">No profit data for this period.</div></div>';
- const w=900,h=330,p=48,vals=rows.map(x=>Number(x.profit||0)),min=Math.min(0,...vals),max=Math.max(0,...vals),range=max-min||1;
- const x=i=>p+(rows.length===1?0:(w-p*2)*i/(rows.length-1)),y=v=p+(h-p*1.35)*(max-v)/range;
- const points=rows.map((r,i)=>x(i)+","+y(r.profit)).join(" "),zero=y(0);
- const labels=rows.map((r,i)=>i===0||i===rows.length-1||rows.length<=8||i%Math.ceil(rows.length/8)===0?'<text x="'+x(i)+'" y="'+(h-12)+'" text-anchor="middle" class="chart-label">'+esc(r.date)+'</text>':"").join("");
- const dots=rows.map((r,i)=>'<circle cx="'+x(i)+'" cy="'+y(r.profit)+'" r="4" class="profit-dot"><title>'+esc(r.date)+' — '+esc(money(r.profit))+'</title></circle>').join("");
- return '<div class="panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="muted" style="color:#2f9e62;font-weight:700">ده جدول الـ Net Profit حسب التاريخ</div></div><span class="muted">Above zero = profit • Below zero = loss</span></div><div style="overflow-x:auto"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;min-width:680px;height:330px;display:block"><line x1="'+p+'" y1="'+zero+'" x2="'+(w-p)+'" y2="'+zero+'" class="chart-zero"/><polyline points="'+points+'" fill="none" class="profit-line"/>'+dots+labels+'</svg></div></div>';
+ const w=900,h=360,pl=58,pr=24,pt=42,pb=48,plotW=w-pl-pr,plotH=h-pt-pb;
+ const vals=rows.map(x=>Number(x.profit||0)),min=Math.min(0,...vals),max=Math.max(0,...vals),range=max-min||1;
+ const zero=pt+(max/range)*plotH;
+ const xStep=rows.length===1?plotW:plotW/rows.length;
+ const barW=Math.max(12,Math.min(52,xStep*.62));
+ const x=i=>pl+i*xStep+(xStep-barW)/2;
+ const y=v=>pt+(max-v)/range*plotH;
+ const ticks=4;
+ const grid=Array.from({length:ticks+1},(_,i)=>{
+   const value=max-(range*i/ticks),yy=y(value);
+   return '<line x1="'+pl+'" y1="'+yy+'" x2="'+(w-pr)+'" y2="'+yy+'" class="chart-grid"/><text x="'+(pl-10)+'" y="'+(yy+4)+'" text-anchor="end" class="chart-axis-label">'+esc(money(value))+'</text>';
+ }).join("");
+ const bars=rows.map((r,i)=>{
+   const value=Number(r.profit||0),yy=value>=0?y(value):zero,hh=Math.max(2,Math.abs(zero-y(value)));
+   return '<rect x="'+x(i)+'" y="'+yy+'" width="'+barW+'" height="'+hh+'" rx="4" class="profit-bar '+(value<0?'profit-bar-loss':'')+'"><title>'+esc(r.date)+' — '+esc(money(value))+'</title></rect>';
+ }).join("");
+ const labels=rows.map((r,i)=>{
+   const show=i===0||i===rows.length-1||rows.length<=8||i%Math.ceil(rows.length/8)===0;
+   return show?'<text x="'+(x(i)+barW/2)+'" y="'+(h-16)+'" text-anchor="middle" class="chart-axis-label">'+esc(r.date)+'</text>':"";
+ }).join("");
+ return '<div class="panel profit-chart-panel"><div class="section-title"><div><h2>'+esc(title)+'</h2><div class="muted" style="color:var(--primary);font-weight:700">Net profit by date</div></div><span class="muted">Green = profit • Red = loss</span></div><div style="overflow-x:auto"><svg viewBox="0 0 '+w+' '+h+'" style="width:100%;min-width:680px;height:360px;display:block">'+grid+'<line x1="'+pl+'" y1="'+zero+'" x2="'+(w-pr)+'" y2="'+zero+'" class="chart-zero"/>'+bars+labels+'</svg></div></div>';
 }
 async function dashboard(c){
  const [summary,data]=await Promise.all([api("/api/system/summary"),loadProfitData()]);
