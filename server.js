@@ -745,7 +745,9 @@ app.get("/api/admin/orders",async(q,r)=>{
  const profile=await getAuthProfile(user.id); if(profile?.role!=="admin"||!profile?.brand_id)return r.status(403).json({error:"Company administrator access required."});
  const gate=isSuperAdminUser(user)?{ok:true}:await requireActiveSubscription(user.id,r); if(!gate.ok)return gate.response;
  const brandId=String(profile.brand_id);
- const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).limit(500);
+ const limit=Math.min(500,Math.max(1,Number(q.query.limit||500)));
+ const offset=Math.max(0,Number.isSafeInteger(Number(q.query.offset))?Number(q.query.offset):0);
+ const orders=await supabase.from("orders").select("*,order_items(*),customers(name,email,phone,city,address)").eq("brand_id",brandId).eq("source","website").order("created_at",{ascending:false}).range(offset,offset+limit-1);
  if(orders.error)return r.status(500).json({error:"Internal server error."});r.json((orders.data||[]).map(o=>({...o,customer:o.customers||null})));
 });
 app.post("/api/app/orders",rateLimit({windowMs:5*60*1000,max:30,keyPrefix:"tenant-admin-orders"}),async(q,r)=>{
