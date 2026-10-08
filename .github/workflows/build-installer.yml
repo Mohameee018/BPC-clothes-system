@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "Cutdown clothes amr/**"
+      - "**"
       - ".github/workflows/build-installer.yml"
   workflow_dispatch:
 
@@ -14,10 +14,6 @@ permissions:
 jobs:
   build-windows-installer:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: Cutdown clothes amr
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +23,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: "Cutdown clothes amr/package.json"
+          cache-dependency-path: "package.json"
 
       - name: Install dependencies
         run: npm install
@@ -39,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: BPC-Clothes-System-Installer
-          path: "Cutdown clothes amr/dist/BPC-Clothes-System-Setup-*.exe"
+          path: "dist/BPC-Clothes-System-Setup-*.exe"
           if-no-files-found: error
 
       - name: Publish GitHub release asset
