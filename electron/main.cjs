@@ -1,6 +1,6 @@
 const { app, BrowserWindow, shell, session } = require("electron");
 
-const APP_URL = process.env.CUTDOWN_APP_URL || "https://cutdown-store-production.up.railway.app";
+const APP_URL = process.env.BPC_APP_URL || "https://bpc-clothes-system.vercel.app";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -20,7 +20,10 @@ function createWindow() {
 
   win.once("ready-to-show", () => win.show());
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsed = new URL(url);
+      if (["https:","http:"].includes(parsed.protocol)) shell.openExternal(parsed.toString());
+    } catch {}
     return { action: "deny" };
   });
   win.loadURL(APP_URL);
