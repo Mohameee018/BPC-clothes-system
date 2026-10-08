@@ -24,16 +24,23 @@ async function consumeRateLimit({windowMs=60000,max=60,keyPrefix="api"}={},q,r){
  const ip=String(q.ip||q.headers?.["x-forwarded-for"]||"unknown").split(",")[0].trim().slice(0,120);
  const key=keyPrefix+":"+ip+":"+String(q.path||"").slice(0,180);
  if(!supabase)return {allowed:false,error:"Supabase is not configured."};
- const result=await supabase.rpc("check_api_rate_limit",{
-  p_bucket_key:key,
-  p_window_seconds:Math.max(1,Math.ceil(windowMs/1000)),
-  p_max_requests:Math.max(1,Math.floor(max))
- });
- if(result.error){
-  console.error("Distributed rate limiter error:",result.error.message);
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),5000);
+ try{
+  const result=await supabase.rpc("check_api_rate_limit",{
+   p_bucket_key:key,
+   p_window_seconds:Math.max(1,Math.ceil(windowMs/1000)),
+   p_max_requests:Math.max(1,Math.floor(max))
+  }).abortSignal(controller.signal);
+  if(result.error){
+   console.error("Distributed rate limiter error:",result.error.message);
+   return {allowed:false,error:"Rate limiter unavailable."};
+  }
+  return {allowed:result.data===true};
+ }catch(error){
+  console.error("Distributed rate limiter timeout/error:",error?.message||error);
   return {allowed:false,error:"Rate limiter unavailable."};
- }
- return {allowed:result.data===true};
+ }finally{clearTimeout(timer);}
 }
 function rateLimit(options={}){return async(q,r,next)=>{
  const result=await consumeRateLimit(options,q,r);
@@ -629,7 +636,34 @@ async function requireBrandAdmin(req,res){const user=await getAuthUser(req);if(!
 async function requireTenantAdmin(req,res){const user=await getAuthUser(req);if(!user)return res.status(401).json({error:"Sign in to continue."});const profile=await getAuthProfile(user.id);if(!profile||profile.role!=="admin"||!profile.brand_id)return res.status(403).json({error:"Company administrator access required."});const brand=await supabase.from("brands").select("id,name,slug,active,website_url,settings,created_at").eq("id",profile.brand_id).maybeSingle();if(brand.error)return res.status(503).json({error:"Could not verify company access."});if(!brand.data?.active)return res.status(403).json({error:"This company is inactive."});const gate=isSuperAdminUser(user)?{ok:true,view:{status:"super_admin",active:true,warning:false}}:await requireActiveSubscription(user.id,res);if(!gate.ok)return gate.response;req.tenant={user,profile,brand:brand.data,brandId:String(profile.brand_id),subscription:gate.view};return null;}
 app.get("/api/app/session",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const profile=await ensureSubscriberWorkspace(q.tenant.user,q.tenant.profile);if(String(profile.brand_id)!==String(q.tenant.brandId)){const brand=await supabase.from("brands").select("id,name,slug,active,website_url,settings,created_at").eq("id",profile.brand_id).maybeSingle();if(brand.data){q.tenant.profile=profile;q.tenant.brand=brand.data;q.tenant.brandId=String(profile.brand_id);}}r.json({user:{id:q.tenant.user.id,email:q.tenant.user.email||null},profile:q.tenant.profile,brand:q.tenant.brand});});
 app.get("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const b=await supabase.from("brands").select("settings").eq("id",q.tenant.brandId).maybeSingle();if(b.error)return r.status(500).json({error:"Could not load settings."});r.json({settings:b.data?.settings||{}});});
-app.patch("/api/app/settings",async(q,r)=>{const denied=await requireTenantAdmin(q,r);if(denied)return denied;const settings=q.body?.settings;if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","backgroundColor","sidebarColor","storeMode","websiteUrl","heroImageUrl","heroTitle","heroSubtitle","heroEyebrow","storyTitle","storyText","aboutText","instagramUrl","facebookUrl","whatsappUrl","tiktokUrl","contactEmail","customDomain","templateId"];const clean={};for(const key of allowed)if(Object.prototype.hasOwnProperty.call(settings,key))clean[key]=settings[key];const websiteUrl=String(clean.websiteUrl||"").trim(); if(clean.storeMode==="external"&&websiteUrl&&!/^https:\/\//i.test(websiteUrl))return r.status(400).json({error:"Website URL must use https://"}); const u=await supabase.from("brands").update({settings:clean,website_url:clean.storeMode==="external"?(websiteUrl||null):null,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings,website_url").single();if(u.error)return r.status(500).json({error:"Could not save settings."});r.json({settings:u.data.settings||{},website_url:u.data.website_url||null});});
+app.patch("/api/app/settings",async(q,r)=>{
+ const denied=await requireTenantAdmin(q,r);if(denied)return denied;
+ const settings=q.body?.settings;
+ if(!settings||typeof settings!=="object"||Array.isArray(settings))return r.status(400).json({error:"Invalid settings."});
+ const allowed=["storeName","storeType","storePhone","storeAddress","logoUrl","invoiceFooter","returnPolicy","printer","paperSize","autoPrint","primaryColor","backgroundColor","sidebarColor","storeMode","websiteUrl","heroImageUrl","heroTitle","heroSubtitle","heroEyebrow","storyTitle","storyText","aboutText","instagramUrl","facebookUrl","whatsappUrl","tiktokUrl","contactEmail","customDomain","templateId"];
+ const maxLengths={storeName:120,storeType:40,storePhone:40,storeAddress:240,logoUrl:2048,invoiceFooter:1000,returnPolicy:2000,printer:80,paperSize:40,primaryColor:20,backgroundColor:20,sidebarColor:20,storeMode:30,websiteUrl:2048,heroImageUrl:2048,heroTitle:240,heroSubtitle:500,heroEyebrow:120,storyTitle:240,storyText:3000,aboutText:3000,instagramUrl:2048,facebookUrl:2048,whatsappUrl:2048,tiktokUrl:2048,contactEmail:320,customDomain:253,templateId:80};
+ const clean={};
+ for(const key of allowed){
+  if(!Object.prototype.hasOwnProperty.call(settings,key))continue;
+  const value=settings[key];
+  if(typeof value==="string"){
+   if(value.length>maxLengths[key])return r.status(400).json({error:"Setting "+key+" is too long."});
+   clean[key]=value.trim();
+  }else if(["autoPrint"].includes(key)&&typeof value==="boolean")clean[key]=value;
+  else if(value!==null&&value!==undefined)return r.status(400).json({error:"Invalid setting "+key+"."});
+ }
+ const websiteUrl=String(clean.websiteUrl||"").trim();
+ const urlFields=["logoUrl","heroImageUrl","instagramUrl","facebookUrl","whatsappUrl","tiktokUrl"];
+ for(const key of urlFields)if(clean[key]&&!/^https:\/\//i.test(String(clean[key])))return r.status(400).json({error:key+" must use https://"});
+ if(clean.storeMode==="external"&&websiteUrl&&!/^https:\/\//i.test(websiteUrl))return r.status(400).json({error:"Website URL must use https://"});
+ if(clean.contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean.contactEmail))return r.status(400).json({error:"Invalid contact email."});
+ if(clean.primaryColor&&!/^#[0-9a-f]{6}$/i.test(clean.primaryColor))return r.status(400).json({error:"Invalid primary color."});
+ if(clean.backgroundColor&&!/^#[0-9a-f]{6}$/i.test(clean.backgroundColor))return r.status(400).json({error:"Invalid background color."});
+ if(clean.sidebarColor&&!/^#[0-9a-f]{6}$/i.test(clean.sidebarColor))return r.status(400).json({error:"Invalid sidebar color."});
+ const u=await supabase.from("brands").update({settings:clean,website_url:clean.storeMode==="external"?(websiteUrl||null):null,updated_at:new Date().toISOString()}).eq("id",q.tenant.brandId).select("settings,website_url").single();
+ if(u.error)return r.status(500).json({error:"Could not save settings."});
+ r.json({settings:u.data.settings||{},website_url:u.data.website_url||null});
+});
 app.post("/api/app/store-asset",rateLimit({windowMs:60*1000,max:10,keyPrefix:"store-asset"}),async(q,r)=>{
  const denied=await requireTenantAdmin(q,r);if(denied)return denied;
  const kind=String(q.body?.kind||"").trim(),encoded=String(q.body?.data_base64||"").trim();
@@ -827,7 +861,9 @@ app.get("/api/system/summary",async(q,r)=>{
 app.get("/api/system/:table",async(q,r)=>{
   const table=String(q.params.table||"");if(!SYSTEM_TABLES[table])return r.status(404).json({error:"Unknown system resource."});
   const gate=await requireSystemAdmin(q,r);if(!gate.ok)return gate.response;
-  const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).limit(limit);
+  const limit=Math.min(500,Math.max(1,Number(q.query.limit||200)));
+  const offset=Math.max(0,Number.isSafeInteger(Number(q.query.offset))?Number(q.query.offset):0);
+  let query=supabase.from(table).select(SYSTEM_TABLES[table].join(",")).eq("brand_id",q.brandId).range(offset,offset+limit-1);
   const search=String(q.query.search||"").trim();if(search&&["products","customers","warehouses","expenses"].includes(table)){const field=table==="products"?"name":table==="customers"?"name":table==="warehouses"?"name":"description";query=query.ilike(field,"%"+search.replace(/[%_]/g,"") +"%")}
   query=query.order(table==="inventory"?"updated_at":"created_at",{ascending:false});
   const result=await query;if(result.error)return r.status(500).json({error:"Could not load "+table+"."});
