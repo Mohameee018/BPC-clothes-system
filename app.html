@@ -386,7 +386,7 @@ $("#loginForm").onsubmit=async e=>{e.preventDefault();$("#loginError").textConte
   let n;while((n=walker.nextNode())){if(n.parentElement&&!["SCRIPT","STYLE","NOSCRIPT"].includes(n.parentElement.tagName))translateNode(n)}
   document.querySelectorAll("input,button,a,select,textarea,[title],[aria-label]").forEach(translateAttributes);
   const toggle=document.getElementById("languageToggle");
-  if(toggle){toggle.textContent=lang==="ar"?"English":"العربية";toggle.setAttribute("aria-label",lang==="ar"?"Switch to English":"التبديل إلى العربية")}
+  if(toggle){const label=lang==="ar"?"English":"العربية";if(toggle.textContent!==label)toggle.textContent=label;const aria=lang==="ar"?"Switch to English":"التبديل إلى العربية";if(toggle.getAttribute("aria-label")!==aria)toggle.setAttribute("aria-label",aria)}
   root.lang=lang;root.dir=lang==="ar"?"rtl":"ltr";
  }
  const toggle=document.getElementById("languageToggle");
