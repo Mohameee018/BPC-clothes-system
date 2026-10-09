@@ -66,7 +66,7 @@ function go(page){current=page;document.querySelectorAll("[data-nav]").forEach(b
 function pill(v){const s=String(v||"—"),bad=/cancel|return|failed|inactive|damaged/i.test(s),warn=/pending|prepar|out|shipping/i.test(s);return '<span class="pill '+(bad?"bad":warn?"warn":"")+'">'+esc(s)+"</span>"}
 function renderSubscription(sub){const el=$("#subscriptionBadge"),warn=$("#subscriptionWarning");if(!sub){el.innerHTML="";return}const date=sub.expires_at?new Date(sub.expires_at).toLocaleString("ar-EG",{dateStyle:"medium",timeStyle:"short"}):"—";el.innerHTML='<div style="font-size:11px;margin-top:3px">'+esc(sub.plan?.name||"Subscription")+" · "+esc(date)+"</div>";if(sub.warning){warn.classList.remove("hidden");warn.innerHTML="⚠️ اشتراكك قرب يخلص — "+esc(date)}}
 async function render(){const c=$("#content");c.innerHTML='<div class="panel">Loading…</div>';try{if(current==="dashboard")return dashboard(c);if(current==="products")return products(c);if(current==="inventory")return inventory(c);if(current==="orders")return orders(c);if(current==="customers")return crud(c,"customers","Customers",["name","phone","email","city","address","status","total_orders","total_spent"]);if(current==="returns")return returns(c);if(current==="expenses")return expenses(c);if(current==="reports")return reports(c);if(current==="settings")return settings(c)}catch(e){c.innerHTML='<div class="panel error" style="color:#a94444">'+esc(e.message)+'</div>'}}
-async function getProfitRange(period){
+function getProfitRange(period){
  const now=new Date(),startMonth=new Date(now.getFullYear(),now.getMonth(),1),nextMonth=new Date(now.getFullYear(),now.getMonth()+1,1);
  if(period==="Last Month")return {from:new Date(now.getFullYear(),now.getMonth()-1,1),to:startMonth};
  if(period==="Last 12 Months")return {from:new Date(now.getFullYear(),now.getMonth()-11,1),to:nextMonth};
@@ -392,7 +392,8 @@ $("#loginForm").onsubmit=async e=>{e.preventDefault();$("#loginError").textConte
  }
  const toggle=document.getElementById("languageToggle");
  if(toggle)toggle.addEventListener("click",()=>{lang=lang==="en"?"ar":"en";translateTree()});
- const observer=new MutationObserver(()=>{if(document.body)translateTree()});
+ let translationFrame=0;
+ const observer=new MutationObserver(()=>{if(lang!=="ar"||translationFrame)return;translationFrame=requestAnimationFrame(()=>{translationFrame=0;if(lang==="ar"&&document.body)translateTree()})});
  observer.observe(document.body,{subtree:true,childList:true,characterData:true});
  translateTree();
 })();
