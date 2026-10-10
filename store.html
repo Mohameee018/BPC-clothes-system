@@ -27,7 +27,7 @@
   text("heroEyebrow",s.heroEyebrow||"THE NEW COLLECTION"); text("heroTitle",s.heroTitle||cfg.brandName||"YOUR BRAND"); text("heroSubtitle",s.heroSubtitle||"اكتشف أحدث منتجاتنا."); text("storyTitle",s.storyTitle||"BUILT FOR YOUR BRAND"); text("storyText",s.storyText||"كل تفاصيل المتجر مربوطة ببيانات البراند."); text("marqueeText",(cfg.brandName||s.storeName||"YOUR BRAND")+" · NEW COLLECTION · "+(cfg.brandName||s.storeName||"YOUR BRAND")+" · NEW COLLECTION · "); text("footerText",s.storeName||cfg.brandName||"");
   const setImg=(id,url)=>{const e=document.getElementById(id);if(e&&url){e.src=url;e.style.display="block"}};
   setImg("storeLogo",s.logoUrl);setImg("footerLogo",s.logoUrl);setImg("floating-shirt",s.heroImageUrl);setImg("story-shirt",s.heroImageUrl);
-  [["instagramLink",s.instagramUrl],["facebookLink",s.facebookUrl],["tiktokLink",s.tiktokUrl],["whatsappLink",s.whatsappUrl]].forEach(([id,u])=>{const e=document.getElementById(id);if(!u)e.style.display="none";else e.href=u});
+  [["instagramLink",s.instagramUrl],["facebookLink",s.facebookUrl||"https://www.facebook.com/share/19iKdwszya/"],["tiktokLink",s.tiktokUrl],["whatsappLink",s.whatsappUrl]].forEach(([id,u])=>{const e=document.getElementById(id);if(!u)e.style.display="none";else{e.href=u;e.style.display=""}});
  }catch{}
 })();
 </script></body></html>
