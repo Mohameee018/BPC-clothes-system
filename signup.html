@@ -123,21 +123,31 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 </main>
 <script>
 const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan"),instapayBox=document.querySelector("#instapayBox"),planSelect=document.querySelector("#planSelect");const code=new URLSearchParams(location.search).get("plan");
-(async()=>{
+const plansReady=(async()=>{
   const r=await fetch("/api/subscription/plans",{cache:"no-store"}).catch(()=>null);
   const d=r?await r.json().catch(()=>({})):{};
   const plans=Array.isArray(d.plans)?d.plans:[];
   planSelect.innerHTML='<option value="">اختار باقة الاشتراك</option>'+plans.map(p=>'<option value="'+esc(p.code)+'">'+esc(p.name)+' · '+Number(p.price||0).toLocaleString("ar-EG")+' EGP</option>').join("");
   const plan=plans.find(x=>String(x.code)===String(code));
   if(plan){planSelect.value=plan.code;planSelect.style.display="none";selected.textContent="الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP";}
-  else{planSelect.style.display="block";selected.textContent="اختار باقة الاشتراك للمتابعة.";}
+  else{planSelect.style.display="block";selected.textContent=plans.length?"اختار باقة الاشتراك للمتابعة.":"تعذر تحميل الباقات. حدّث الصفحة وحاول مرة أخرى.";}
+  return plans;
 })();
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 f.onsubmit=async e=>{
   e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
   const button=f.querySelector("button");button.disabled=true;
   try{
-    const body=Object.fromEntries(new FormData(f).entries());body.plan=String(planSelect.value||code||"").trim().toLowerCase();if(!body.plan){msg.textContent="اختار باقة الاشتراك قبل المتابعة.";msg.style.color="#ffb4b4";button.disabled=false;return;}
+    const plans=await plansReady;
+    const body=Object.fromEntries(new FormData(f).entries());
+    body.name=String(f.elements.name.value||"").trim();
+    body.email=String(f.elements.email.value||"").trim();
+    body.password=String(f.elements.password.value||"");
+    body.phone=String(f.elements.phone.value||"").trim();
+    const selectedPlan=plans.find(p=>String(p.code).toLowerCase()===String(planSelect.value||code||"").trim().toLowerCase());
+    body.plan=String(selectedPlan?.code||"").trim().toLowerCase();
+    if(!body.name||!body.email||body.password.length<8){msg.textContent="راجع الاسم والبريد الإلكتروني وكلمة المرور (8 أحرف على الأقل).";msg.style.color="#ffb4b4";return;}
+    if(!body.plan){msg.textContent="اختار باقة اشتراك متاحة قبل المتابعة. لو الباقات مش ظاهرة، حدّث الصفحة وحاول تاني.";msg.style.color="#ffb4b4";return;}
     const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
