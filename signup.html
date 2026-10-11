@@ -137,7 +137,7 @@ f.onsubmit=async e=>{
   e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
   const button=f.querySelector("button");button.disabled=true;
   try{
-    const body=Object.fromEntries(new FormData(f).entries());
+    const body=Object.fromEntries(new FormData(f).entries());body.plan=String(planSelect.value||code||"").trim().toLowerCase();if(!body.plan){msg.textContent="اختار باقة الاشتراك قبل المتابعة.";msg.style.color="#ffb4b4";button.disabled=false;return;}
     const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
