@@ -100,6 +100,7 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
   <p class="signup-copy">أنشئ حسابك أولًا، وبعدها هتنتقل تلقائيًا إلى بوابة الدفع الآمنة لإتمام الاشتراك. بعد نجاح الدفع يتم تفعيل حسابك وإدخالك للنظام تلقائيًا.</p>
   <div id="selectedPlan" class="signup-plan">جاري التحقق من الباقة…</div>
   <form id="f" class="signup-form">
+    <select name="plan" id="planSelect" required aria-label="باقة الاشتراك" style="display:none;width:100%;padding:14px 16px;border-radius:12px;border:1px solid rgba(190,255,214,.2);background:#082b19;color:#f7fbf8;font:inherit;margin-bottom:14px"><option value="">اختار باقة الاشتراك</option></select>
     <input name="name" placeholder="الاسم" maxlength="120" required>
     <input name="email" type="email" placeholder="البريد الإلكتروني" maxlength="254" required>
     <input name="phone" placeholder="رقم الهاتف" maxlength="40">
@@ -121,19 +122,22 @@ body.signup-page{background:#061b10;color:#f7fbf8;font-family:"Readex Pro",sans-
 </div>
 </main>
 <script>
-const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan"),instapayBox=document.querySelector("#instapayBox");const code=new URLSearchParams(location.search).get("plan");
+const f=document.querySelector("#f"),msg=document.querySelector("#msg"),selected=document.querySelector("#selectedPlan"),instapayBox=document.querySelector("#instapayBox"),planSelect=document.querySelector("#planSelect");const code=new URLSearchParams(location.search).get("plan");
 (async()=>{
-  const r=await fetch("/api/subscription/plans").catch(()=>null);
+  const r=await fetch("/api/subscription/plans",{cache:"no-store"}).catch(()=>null);
   const d=r?await r.json().catch(()=>({})):{};
-  const plan=(d.plans||[]).find(x=>String(x.code)===String(code));
-  selected.textContent=plan?("الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP"): "اختار الباقة من صفحة الاشتراكات أولًا.";
+  const plans=Array.isArray(d.plans)?d.plans:[];
+  planSelect.innerHTML='<option value="">اختار باقة الاشتراك</option>'+plans.map(p=>'<option value="'+esc(p.code)+'">'+esc(p.name)+' · '+Number(p.price||0).toLocaleString("ar-EG")+' EGP</option>').join("");
+  const plan=plans.find(x=>String(x.code)===String(code));
+  if(plan){planSelect.value=plan.code;planSelect.style.display="none";selected.textContent="الباقة المختارة: "+plan.name+" · "+Number(plan.price||0).toLocaleString("ar-EG")+" EGP";}
+  else{planSelect.style.display="block";selected.textContent="اختار باقة الاشتراك للمتابعة.";}
 })();
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 f.onsubmit=async e=>{
   e.preventDefault();msg.textContent="جارٍ إنشاء الحساب…";msg.style.color="rgba(247,251,248,.65)";
   const button=f.querySelector("button");button.disabled=true;
   try{
-    const body=Object.fromEntries(new FormData(f).entries());body.plan=code;
+    const body=Object.fromEntries(new FormData(f).entries());
     const r=await fetch("/api/subscription/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){msg.textContent=d.error||"تعذر إنشاء الحساب.";msg.style.color="#ffb4b4";return}
