@@ -559,11 +559,11 @@ app.post("/api/admin/subscriptions/approve-manual-transfer",async(q,r)=>{
  const sub=await supabase.from("subscriptions").select("id,brand_id,auth_user_id,status,payment_method,payment_reference,notes,plan_id,customer_name,customer_email,subscription_plans(code,name,duration_days,price)").eq("id",id).maybeSingle();
  if(sub.error||!sub.data)return r.status(404).json({error:"Subscription not found."});
  if(sub.data.status!=="pending"||!["instapay","vodafone_cash"].includes(sub.data.payment_method))return r.status(409).json({error:"This subscription is not a pending manual payment."});
- const finalReference=reference||String(sub.data.payment_reference||"").trim();if(!finalReference)return r.status(400).json({error:"A transaction reference is required before approval."});
+ const finalReference=reference||String(sub.data.payment_reference||"").trim();
  const now=new Date(),days=Number(sub.data.subscription_plans?.duration_days||30),expires=addDays(now,days);
- const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
+ const up=await supabase.from("subscriptions").update({status:"active",starts_at:now.toISOString(),expires_at:expires.toISOString(),payment_reference:finalReference||null,notes:notes||sub.data.notes||null,updated_at:now.toISOString()}).eq("id",id).eq("status","pending").select("id,status,starts_at,expires_at").single();
  if(up.error)return r.status(500).json({error:"Could not activate the subscription."});
- const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:sub.data.payment_method,reference:finalReference,notes:notes||null});
+ const pay=await supabase.from("subscription_payments").insert({subscription_id:id,amount:Number(sub.data.subscription_plans?.price||0),payment_method:sub.data.payment_method,reference:finalReference||null,notes:notes||null});
  if(pay.error)return r.status(500).json({error:"Subscription activated, but the payment record could not be saved."});
  r.json({ok:true,subscription:up.data});
 });
