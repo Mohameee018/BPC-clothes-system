@@ -32,7 +32,7 @@
 (async()=>{
  const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
  const withTimeout=(promise,ms=10000)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error("Request timed out.")),ms))]);
- const cfg=await withTimeout(fetch("/api/public-config").then(r=>r.json()),10000).catch(e=>({error:e.message}));
+ const cfg=await withTimeout(fetch("/api/admin-auth-config").then(r=>r.json()),10000).catch(e=>({error:e.message}));
  const root=document.querySelector("main");
  if(!cfg.supabaseUrl||!cfg.supabaseKey){
    const msg=!cfg.supabaseUrl&&!cfg.supabaseKey?"إعدادات تسجيل الدخول غير متاحة من السيرفر (Supabase URL وPublishable Key ناقصين).":!cfg.supabaseUrl?"عنوان Supabase غير موجود في إعدادات السيرفر.":"مفتاح Supabase العام غير موجود في إعدادات السيرفر.";
