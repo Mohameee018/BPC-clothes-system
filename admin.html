@@ -35,7 +35,8 @@
  const cfg=await withTimeout(fetch("/api/public-config").then(r=>r.json()),10000).catch(e=>({error:e.message}));
  const root=document.querySelector("main");
  if(!cfg.supabaseUrl||!cfg.supabaseKey){
-   document.querySelector("#info").textContent="Supabase Auth is not configured.";
+   const msg=!cfg.supabaseUrl&&!cfg.supabaseKey?"إعدادات تسجيل الدخول غير متاحة من السيرفر (Supabase URL وPublishable Key ناقصين).":!cfg.supabaseUrl?"عنوان Supabase غير موجود في إعدادات السيرفر.":"مفتاح Supabase العام غير موجود في إعدادات السيرفر.";
+   document.querySelector("#loginMsg").textContent=msg;
    return;
  }
  const sb=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseKey);
@@ -55,8 +56,10 @@
    const h={Authorization:"Bearer "+s.access_token};
    const ping=await withTimeout(fetch("/api/admin/ping",{headers:h}),10000).catch(()=>null);
    if(!ping||!ping.ok){
+     const status=ping?.status;
+     const details=status===401?"تم تسجيل الدخول لكن السيرفر لم يتعرف على جلسة الدخول (401). جرّب تحديث الصفحة وتسجيل الدخول مرة أخرى.":status===403?"كلمة المرور صحيحة، لكن هذا الحساب غير مصرح له بلوحة الإدارة (403). يلزم ضبط بريد Super Admin في إعدادات Vercel.":status===429?"طلبات كثيرة على لوحة الإدارة؛ انتظر دقيقة ثم حاول مجددًا.":status>=500?"تم قبول تسجيل الدخول، لكن السيرفر واجه خطأ أثناء التحقق من صلاحيات الإدارة (HTTP "+status+").":"تعذر الاتصال بخدمة التحقق من صلاحيات الإدارة. افحص الاتصال ثم أعد المحاولة.";
      await sb.auth.signOut();
-     showLogin("الحساب ده مش مسموح له بدخول لوحة الـAdmin.");
+     showLogin(details);
      return;
    }
    showAdmin();
@@ -83,7 +86,18 @@
    const password=document.querySelector("#adminPassword").value;
    const result=await withTimeout(sb.auth.signInWithPassword({email,password}),15000).catch(e=>({error:e}));
    const error=result?.error;
-   if(error){loginMsg.textContent=error.message==="Invalid login credentials"?"الإيميل أو الباسورد غير صحيح.":error.message;return;}
+   if(error){
+     const raw=String(error.message||"");
+     const lower=raw.toLowerCase();
+     let message;
+     if(lower.includes("invalid login credentials")) message="رفض Supabase بيانات الدخول: الإيميل غير موجود أو كلمة المرور غير صحيحة. لأسباب أمنية لا يحدد Supabase أيّهما خطأ.";
+     else if(lower.includes("email not confirmed")) message="الحساب موجود لكن تأكيد البريد الإلكتروني مطلوب قبل الدخول.";
+     else if(lower.includes("too many requests")||lower.includes("rate limit")) message="محاولات كثيرة. استنى شوية وجرب تاني.";
+     else if(lower.includes("failed to fetch")||lower.includes("network")) message="تعذر الاتصال بـSupabase. المشكلة اتصال أو إعدادات خدمة، وليست رسالة تأكيد أن كلمة المرور خطأ.";
+     else if(lower.includes("invalid api key")||lower.includes("apikey")) message="مفتاح Supabase غير صالح أو غير مضبوط في إعدادات Vercel.";
+     else message="فشل تسجيل الدخول: "+raw;
+     loginMsg.textContent=message;return;
+   }
    await verifyAndLoad();
  };
 })();
